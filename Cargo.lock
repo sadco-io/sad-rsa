@@ -700,37 +700,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba39f3699c378cd8970968dcbff9c43159ea4cfbd88d43c00b22f2ef10a435d2"
 
 [[package]]
-name = "rsa"
-version = "0.10.0-rc.12"
-dependencies = [
- "base64ct",
- "const-oid",
- "crypto-bigint",
- "crypto-common",
- "crypto-primes",
- "digest",
- "hex",
- "hex-literal",
- "hmac",
- "pkcs1",
- "pkcs8",
- "proptest",
- "rand 0.10.0-rc.5",
- "rand_core 0.10.0-rc-3",
- "rstest",
- "serde",
- "serde_json",
- "serde_test",
- "serdect",
- "sha1",
- "sha2",
- "sha3",
- "signature",
- "spki",
- "zeroize",
-]
-
-[[package]]
 name = "rstest"
 version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -791,6 +760,37 @@ dependencies = [
  "quick-error",
  "tempfile",
  "wait-timeout",
+]
+
+[[package]]
+name = "sad-rsa"
+version = "0.1.0"
+dependencies = [
+ "base64ct",
+ "const-oid",
+ "crypto-bigint",
+ "crypto-common",
+ "crypto-primes",
+ "digest",
+ "hex",
+ "hex-literal",
+ "hmac",
+ "pkcs1",
+ "pkcs8",
+ "proptest",
+ "rand 0.10.0-rc.5",
+ "rand_core 0.10.0-rc-3",
+ "rstest",
+ "serde",
+ "serde_json",
+ "serde_test",
+ "serdect",
+ "sha1",
+ "sha2",
+ "sha3",
+ "signature",
+ "spki",
+ "zeroize",
 ]
 
 [[package]]

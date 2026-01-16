@@ -7,9 +7,9 @@
 use crypto_bigint::BoxedUint;
 use rand::rngs::ChaCha8Rng;
 use rand_core::{RngCore, SeedableRng};
-use rsa::pkcs1v15::DecryptingKey;
-use rsa::traits::{Decryptor, EncryptingKeypair, RandomizedDecryptor, RandomizedEncryptor};
-use rsa::RsaPrivateKey;
+use sad_rsa::pkcs1v15::DecryptingKey;
+use sad_rsa::traits::{Decryptor, EncryptingKeypair, RandomizedDecryptor, RandomizedEncryptor};
+use sad_rsa::RsaPrivateKey;
 
 /// Helper function to create a test key
 fn get_test_key() -> RsaPrivateKey {

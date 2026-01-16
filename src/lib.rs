@@ -1,7 +1,6 @@
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
-#![doc(html_logo_url = "https://raw.githubusercontent.com/RustCrypto/meta/master/logo_small.png")]
 #![warn(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 
@@ -20,11 +19,11 @@
 //!
 //! ## OAEP encryption
 //!
-//! Note: requires `sha2` feature of `rsa` crate is enabled.
+//! Note: requires `sha2` feature of `sad-rsa` crate is enabled.
 //!
 #![cfg_attr(feature = "sha2", doc = "```")]
 #![cfg_attr(not(feature = "sha2"), doc = "```ignore")]
-//! use rsa::{RsaPrivateKey, RsaPublicKey, Oaep, sha2::Sha256};
+//! use sad_rsa::{RsaPrivateKey, RsaPublicKey, Oaep, sha2::Sha256};
 //!
 //! let mut rng = rand::thread_rng();
 //!
@@ -46,7 +45,7 @@
 //!
 //! ## PKCS#1 v1.5 encryption
 //! ```
-//! use rsa::{RsaPrivateKey, RsaPublicKey, Pkcs1v15Encrypt};
+//! use sad_rsa::{RsaPrivateKey, RsaPublicKey, Pkcs1v15Encrypt};
 //!
 //! let mut rng = rand::thread_rng();
 //!
@@ -66,14 +65,14 @@
 //!
 //! ## PKCS#1 v1.5 signatures
 //!
-//! Note: requires `sha2` feature of `rsa` crate is enabled.
+//! Note: requires `sha2` feature of `sad-rsa` crate is enabled.
 //!
 #![cfg_attr(feature = "sha2", doc = "```")]
 #![cfg_attr(not(feature = "sha2"), doc = "```ignore")]
-//! use rsa::RsaPrivateKey;
-//! use rsa::pkcs1v15::{SigningKey, VerifyingKey};
-//! use rsa::signature::{Keypair, RandomizedSigner, SignatureEncoding, Verifier};
-//! use rsa::sha2::{Digest, Sha256};
+//! use sad_rsa::RsaPrivateKey;
+//! use sad_rsa::pkcs1v15::{SigningKey, VerifyingKey};
+//! use sad_rsa::signature::{Keypair, RandomizedSigner, SignatureEncoding, Verifier};
+//! use sad_rsa::sha2::{Digest, Sha256};
 //!
 //! let mut rng = rand::thread_rng();
 //!
@@ -93,14 +92,14 @@
 //!
 //! ## PSS signatures
 //!
-//! Note: requires `sha2` feature of `rsa` crate is enabled.
+//! Note: requires `sha2` feature of `sad-rsa` crate is enabled.
 //!
 #![cfg_attr(feature = "sha2", doc = "```")]
 #![cfg_attr(not(feature = "sha2"), doc = "```ignore")]
-//! use rsa::RsaPrivateKey;
-//! use rsa::pss::{BlindedSigningKey, VerifyingKey};
-//! use rsa::signature::{Keypair,RandomizedSigner, SignatureEncoding, Verifier};
-//! use rsa::sha2::{Digest, Sha256};
+//! use sad_rsa::RsaPrivateKey;
+//! use sad_rsa::pss::{BlindedSigningKey, VerifyingKey};
+//! use sad_rsa::signature::{Keypair,RandomizedSigner, SignatureEncoding, Verifier};
+//! use sad_rsa::sha2::{Digest, Sha256};
 //!
 //! let mut rng = rand::thread_rng();
 //!
@@ -134,7 +133,7 @@
 //!
 //! The following traits can be used to decode/encode [`RsaPrivateKey`] and
 //! [`RsaPublicKey`] as PKCS#1. Note that [`pkcs1`] is re-exported from the
-//! toplevel of the `rsa` crate:
+//! toplevel of the `sad-rsa` crate:
 //!
 //! - [`pkcs1::DecodeRsaPrivateKey`]: decode RSA private keys from PKCS#1
 //! - [`pkcs1::EncodeRsaPrivateKey`]: encode RSA private keys to PKCS#1
@@ -147,7 +146,7 @@
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! # #[cfg(all(feature = "encoding", feature = "std"))]
 //! # {
-//! use rsa::{RsaPublicKey, pkcs1::DecodeRsaPublicKey};
+//! use sad_rsa::{RsaPublicKey, pkcs1::DecodeRsaPublicKey};
 //!
 //! let pem = "-----BEGIN RSA PUBLIC KEY-----
 //! MIIBCgKCAQEAtsQsUV8QpqrygsY+2+JCQ6Fw8/omM71IM2N/R8pPbzbgOl0p78MZ
@@ -178,7 +177,7 @@
 //!
 //! The following traits can be used to decode/encode [`RsaPrivateKey`] and
 //! [`RsaPublicKey`] as PKCS#8. Note that [`pkcs8`] is re-exported from the
-//! toplevel of the `rsa` crate:
+//! toplevel of the `sad-rsa` crate:
 //!
 //! - [`pkcs8::DecodePrivateKey`]: decode private keys from PKCS#8
 //! - [`pkcs8::EncodePrivateKey`]: encode private keys to PKCS#8
@@ -191,7 +190,7 @@
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! # #[cfg(all(feature = "encoding", feature = "std"))]
 //! # {
-//! use rsa::{RsaPublicKey, pkcs8::DecodePublicKey};
+//! use sad_rsa::{RsaPublicKey, pkcs8::DecodePublicKey};
 //!
 //! let pem = "-----BEGIN PUBLIC KEY-----
 //! MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtsQsUV8QpqrygsY+2+JC

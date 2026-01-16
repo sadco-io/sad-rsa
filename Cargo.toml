@@ -1,13 +1,13 @@
 [package]
-name = "rsa"
-version = "0.10.0-rc.12"
-authors = ["RustCrypto Developers", "dignifiedquire <dignifiedquire@gmail.com>"]
+name = "sad-rsa"
+version = "0.1.0"
+authors = ["Sadco Security Team", "RustCrypto Developers", "dignifiedquire <dignifiedquire@gmail.com>"]
 edition = "2021"
-description = "Pure Rust RSA implementation"
+description = "Hardened pure Rust RSA implementation with Marvin attack mitigation"
 license = "MIT OR Apache-2.0"
-documentation = "https://docs.rs/rsa"
-repository = "https://github.com/RustCrypto/RSA"
-keywords = ["rsa", "encryption", "security", "crypto"]
+documentation = "https://docs.rs/sad-rsa"
+repository = "https://github.com/sadco-io/sad-rsa"
+keywords = ["rsa", "encryption", "security", "crypto", "constant-time"]
 categories = ["cryptography"]
 readme = "README.md"
 rust-version = "1.85"

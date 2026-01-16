@@ -1,0 +1,36 @@
+sad-rsa
+Copyright 2026 Sadco Security Team
+
+This project is a hardened fork of the RustCrypto RSA crate, with
+additional security mitigations for timing side-channel attacks.
+
+Original RSA Crate
+==================
+Copyright 2018-2026 RustCrypto Developers
+
+The original RSA crate was developed by the RustCrypto project:
+https://github.com/RustCrypto/RSA
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+Modifications
+=============
+This fork includes the following security enhancements:
+
+- Implicit rejection for PKCS#1 v1.5 decryption (Marvin attack mitigation)
+- RFC 8017 compliant ciphertext length validation
+- Secure memory handling with zeroization of sensitive key material
+- I2OSP-compliant KDK derivation per draft-irtf-cfrg-rsa-guidance-04
+
+These modifications were developed by the Sadco Security Team with
+assistance from Claude (Anthropic).

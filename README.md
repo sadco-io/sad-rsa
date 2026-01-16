@@ -1,19 +1,43 @@
-# [RustCrypto]: RSA
+# sad-rsa
 
 [![crates.io][crate-image]][crate-link]
 [![Documentation][doc-image]][doc-link]
 [![Build Status][build-image]][build-link]
-[![Dependency Status][deps-image]][deps-link]
 ![Apache2/MIT licensed][license-image]
 ![MSRV][msrv-image]
-[![Project Chat][chat-image]][chat-link]
 
-A portable RSA implementation in pure Rust.
+A **hardened** pure Rust RSA implementation with protection against timing side-channel attacks.
 
-## Example
+This is a security-focused fork of the [RustCrypto RSA crate][rustcrypto-rsa] that implements **implicit rejection** for PKCS#1 v1.5 decryption to mitigate the [Marvin Attack][marvin-attack] ([RUSTSEC-2023-0071][rustsec]).
+
+## Security Improvements
+
+| Feature | sad-rsa | upstream rsa |
+|---------|---------|--------------|
+| Marvin Attack mitigation | **Yes** | No |
+| Implicit rejection (PKCS#1 v1.5) | **Default** | Not implemented |
+| RFC 8017 length validation | **Yes** | Partial |
+| Key material zeroization | **Enhanced** | Basic |
+
+### Implicit Rejection
+
+Instead of returning distinguishable errors for invalid PKCS#1 v1.5 padding, this crate returns a deterministic pseudo-random message derived from the ciphertext. This makes valid and invalid ciphertexts indistinguishable to attackers, preventing padding oracle attacks.
+
+Implementation follows [draft-irtf-cfrg-rsa-guidance-04][irtf-guidance].
+
+## Usage
+
+Replace `rsa` with `sad-rsa` in your `Cargo.toml`:
+
+```toml
+[dependencies]
+sad-rsa = "0.1"
+```
+
+The API is fully compatible with the upstream `rsa` crate:
 
 ```rust
-use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
+use sad_rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
 
 let mut rng = rand::thread_rng();
 let bits = 2048;
@@ -25,59 +49,36 @@ let data = b"hello world";
 let enc_data = pub_key.encrypt(&mut rng, Pkcs1v15Encrypt, &data[..]).expect("failed to encrypt");
 assert_ne!(&data[..], &enc_data[..]);
 
-// Decrypt
+// Decrypt - now protected against Marvin attack
 let dec_data = priv_key.decrypt(Pkcs1v15Encrypt, &enc_data).expect("failed to decrypt");
 assert_eq!(&data[..], &dec_data[..]);
 ```
 
-> **Note:** If you encounter unusually slow key generation time while using `RsaPrivateKey::new` you can try to compile in release mode or add the following to your `Cargo.toml`. Key generation is much faster when building with higher optimization levels, but this will increase the compile time a bit.
+## Migration from `rsa`
+
+1. Replace `rsa` with `sad-rsa` in `Cargo.toml`
+2. Replace `use rsa::` with `use sad_rsa::` in your code
+3. That's it - the API is identical
+
+**Note:** Invalid ciphertexts will now return synthetic messages instead of errors. If your code explicitly checks for decryption errors to detect tampering, you should use authenticated encryption (e.g., RSA-OAEP or hybrid encryption with AES-GCM) instead.
+
+## Performance
+
+> **Note:** Key generation is much faster when building with higher optimization levels:
 > ```toml
-> [profile.debug]
-> opt-level = 3
+> [profile.dev]
+> opt-level = 2
 > ```
-
-## Status
-
-Currently at Phase 1 (v) 🚧
-
-There will be three phases before `1.0` 🚢 can be released.
-
-1. 🚧  Make it work
-    - [x] Prime generation ✅
-    - [x] Key generation ✅
-    - [x] PKCS1v1.5: Encryption & Decryption ✅
-    - [x] PKCS1v1.5: Sign & Verify ✅
-    - [ ] PKCS1v1.5 (session key): Encryption & Decryption
-    - [x] OAEP: Encryption & Decryption
-    - [x] PSS: Sign & Verify
-    - [x] Key import & export
-2. 🚀 Make it fast
-    - [x] Benchmarks ✅
-    - [ ] compare to other implementations 🚧
-    - [ ] optimize 🚧
-3. 🔐 Make it secure
-    - [ ] Fuzz testing
-    - [ ] Security Audits
-
-## ⚠️Security Warning
-
-This crate has received one [security audit by Include Security][audit], with
-only one minor finding which has since been addressed.
-
-See the [open security issues] on our issue tracker for other known problems.
-
-~~Notably the implementation of [modular exponentiation is not constant time],
-but timing variability is masked using [random blinding], a commonly used
-technique.~~ This crate is vulnerable to the [Marvin Attack] which could enable
-private key recovery by a network attacker (see [RUSTSEC-2023-0071]).
-
-You can follow our work on mitigating this issue in [#390].
 
 ## Minimum Supported Rust Version (MSRV)
 
 This crate supports Rust 1.85 or higher.
 
-In the future MSRV can be changed, but it will be done with a minor version bump.
+## Attribution
+
+This crate is a fork of the excellent [RustCrypto RSA][rustcrypto-rsa] crate. We are grateful to the RustCrypto developers for their foundational work.
+
+See the [NOTICE](NOTICE) file for full attribution details.
 
 ## License
 
@@ -96,28 +97,18 @@ dual licensed as above, without any additional terms or conditions.
 
 [//]: # (badges)
 
-[crate-image]: https://img.shields.io/crates/v/rsa?logo=rust
-[crate-link]: https://crates.io/crates/rsa
-[doc-image]: https://docs.rs/rsa/badge.svg
-[doc-link]: https://docs.rs/rsa
-[build-image]: https://github.com/RustCrypto/RSA/actions/workflows/ci.yml/badge.svg
-[build-link]: https://github.com/RustCrypto/RSA/actions/workflows/ci.yml
-[build-image]: https://github.com/RustCrypto/RSA/actions/workflows/ci.yml/badge.svg?branch=master
-[build-link]: https://github.com/RustCrypto/RSA/actions/workflows/ci.yml?query=branch:master
+[crate-image]: https://img.shields.io/crates/v/sad-rsa?logo=rust
+[crate-link]: https://crates.io/crates/sad-rsa
+[doc-image]: https://docs.rs/sad-rsa/badge.svg
+[doc-link]: https://docs.rs/sad-rsa
+[build-image]: https://github.com/sadco-io/sad-rsa/actions/workflows/ci.yml/badge.svg
+[build-link]: https://github.com/sadco-io/sad-rsa/actions/workflows/ci.yml
 [license-image]: https://img.shields.io/badge/license-Apache2.0/MIT-blue.svg
 [msrv-image]: https://img.shields.io/badge/rustc-1.85+-blue.svg
-[chat-image]: https://img.shields.io/badge/zulip-join_chat-blue.svg
-[chat-link]: https://rustcrypto.zulipchat.com/#narrow/stream/260047-RSA
-[deps-image]: https://deps.rs/repo/github/RustCrypto/RSA/status.svg
-[deps-link]: https://deps.rs/repo/github/RustCrypto/RSA
 
 [//]: # (links)
 
-[RustCrypto]: https://github.com/RustCrypto/
-[audit]: https://public.opentech.fund/documents/1907_OTF_DeltaChat_RPGP_RustRSA_GB_Report_v1.pdf
-[open security issues]: https://github.com/RustCrypto/RSA/issues?q=is%3Aissue+is%3Aopen+label%3Asecurity
-[modular exponentiation is not constant time]: https://github.com/RustCrypto/RSA/issues/19
-[random blinding]: https://en.wikipedia.org/wiki/Blinding_(cryptography)
-[Marvin Attack]: https://people.redhat.com/~hkario/marvin/
-[RUSTSEC-2023-0071]: https://rustsec.org/advisories/RUSTSEC-2023-0071.html
-[#390]: https://github.com/RustCrypto/RSA/issues/390
+[rustcrypto-rsa]: https://github.com/RustCrypto/RSA
+[marvin-attack]: https://people.redhat.com/~hkario/marvin/
+[rustsec]: https://rustsec.org/advisories/RUSTSEC-2023-0071.html
+[irtf-guidance]: https://datatracker.ietf.org/doc/draft-irtf-cfrg-rsa-guidance/
