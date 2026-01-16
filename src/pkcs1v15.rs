@@ -25,11 +25,14 @@ use digest::Digest;
 use rand_core::TryCryptoRng;
 
 use crate::algorithms::pad::{uint_to_be_pad, uint_to_zeroizing_be_pad};
-use crate::algorithms::pkcs1v15::*;
+use crate::algorithms::pkcs1v15::{
+    derive_kdk as pkcs1v15_generate_kdk, pkcs1v15_encrypt_pad, pkcs1v15_encrypt_unpad,
+    pkcs1v15_generate_prefix, pkcs1v15_sign_pad, pkcs1v15_sign_unpad,
+};
 use crate::algorithms::rsa::{rsa_decrypt_and_check, rsa_encrypt};
 use crate::errors::{Error, Result};
 use crate::key::{self, RsaPrivateKey, RsaPublicKey};
-use crate::traits::{PaddingScheme, PublicKeyParts, SignatureScheme};
+use crate::traits::{keys::PrivateKeyParts, PaddingScheme, PublicKeyParts, SignatureScheme};
 
 /// Encryption using PKCS#1 v1.5 padding.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -143,11 +146,10 @@ fn encrypt<R: TryCryptoRng + ?Sized>(
 ///
 /// If an `rng` is passed, it uses RSA blinding to avoid timing side-channel attacks.
 ///
-/// Note that whether this function returns an error or not discloses secret
-/// information. If an attacker can cause this function to run repeatedly and
-/// learn whether each instance returned an error then they can decrypt and
-/// forge signatures as if they had the private key. See
-/// `decrypt_session_key` for a way of solving this problem.
+/// This function implements implicit rejection as specified in draft-irtf-cfrg-rsa-guidance-04
+/// to mitigate the Marvin attack (RUSTSEC-2023-0071). When padding validation fails, instead
+/// of returning an error, it returns a deterministic pseudo-random message. This makes valid
+/// and invalid ciphertexts indistinguishable in timing and memory access patterns.
 #[inline]
 fn decrypt<R: TryCryptoRng + ?Sized>(
     rng: Option<&mut R>,
@@ -156,11 +158,22 @@ fn decrypt<R: TryCryptoRng + ?Sized>(
 ) -> Result<Vec<u8>> {
     key::check_public(priv_key)?;
 
-    let ciphertext = BoxedUint::from_be_slice(ciphertext, priv_key.n_bits_precision())?;
-    let em = rsa_decrypt_and_check(priv_key, rng, &ciphertext)?;
+    // RFC 8017 Section 7.2.2: Length checking
+    // If the length of the ciphertext C is not k octets, output 'decryption error'
+    let k = priv_key.size();
+    if ciphertext.len() != k {
+        return Err(Error::Decryption);
+    }
+
+    // Derive KDK before decryption for implicit rejection
+    let kdk = pkcs1v15_generate_kdk(priv_key.d(), ciphertext);
+
+    let ciphertext_uint = BoxedUint::from_be_slice(ciphertext, priv_key.n_bits_precision())?;
+    let em = rsa_decrypt_and_check(priv_key, rng, &ciphertext_uint)?;
     let em = uint_to_zeroizing_be_pad(em, priv_key.size())?;
 
-    pkcs1v15_encrypt_unpad(em, priv_key.size())
+    // Use implicit rejection - never returns error based on padding validity
+    Ok(pkcs1v15_encrypt_unpad(em, priv_key.size(), &kdk))
 }
 
 /// Calculates the signature of hashed using

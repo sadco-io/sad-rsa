@@ -8,12 +8,16 @@
 
 use alloc::vec::Vec;
 use const_oid::AssociatedOid;
-use crypto_bigint::{Choice, CtEq, CtSelect};
-use digest::Digest;
+use crypto_bigint::{BoxedUint, Choice, CtEq, CtSelect};
+use digest::{Digest, Mac, KeyInit};
+use hmac::Hmac;
 use rand_core::TryCryptoRng;
+use sha2::Sha256;
 use zeroize::Zeroizing;
 
 use crate::errors::{Error, Result};
+
+type HmacSha256 = Hmac<Sha256>;
 
 /// Fills the provided slice with random values, which are guaranteed
 /// to not be zero.
@@ -59,21 +63,174 @@ where
     Ok(em)
 }
 
-/// Removes the encryption padding scheme from PKCS#1 v1.5.
+/// Implicit Rejection Pseudo-Random Function (IRPRF) as specified in
+/// draft-irtf-cfrg-rsa-guidance-04 Section 7.
 ///
-/// Note that whether this function returns an error or not discloses secret
-/// information. If an attacker can cause this function to run repeatedly and
-/// learn whether each instance returned an error then they can decrypt and
-/// forge signatures as if they had the private key. See
-/// `decrypt_session_key` for a way of solving this problem.
+/// This function generates deterministic pseudo-random output from a key and label.
+/// It is used to generate synthetic messages for implicit rejection.
+///
+/// # Arguments
+/// * `key` - The key material (typically KDK)
+/// * `label` - A label to domain-separate different uses
+/// * `output_length` - Number of bytes to generate
 #[inline]
-pub(crate) fn pkcs1v15_encrypt_unpad(em: Vec<u8>, k: usize) -> Result<Vec<u8>> {
-    let (valid, out, index) = decrypt_inner(em, k)?;
-    if valid == 0 {
-        return Err(Error::Decryption);
+fn irprf(key: &[u8], label: &[u8], output_length: usize) -> Vec<u8> {
+    let mut output = Vec::with_capacity(output_length);
+    let mut counter: u16 = 0;
+
+    while output.len() < output_length {
+        // message = counter || label || (output_length * 8 as u16)
+        let mut message = Vec::with_capacity(2 + label.len() + 2);
+        message.extend_from_slice(&counter.to_be_bytes());
+        message.extend_from_slice(label);
+        message.extend_from_slice(&((output_length * 8) as u16).to_be_bytes());
+
+        // HMAC-SHA256(key, message)
+        let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
+        Mac::update(&mut mac, &message);
+        output.extend_from_slice(&Mac::finalize(mac).into_bytes());
+
+        counter += 1;
     }
 
-    Ok(out[index as usize..].to_vec())
+    output.truncate(output_length);
+    output
+}
+
+/// Derives the Key Derivation Key (KDK) from the private exponent and ciphertext.
+///
+/// This implements the KDK derivation as specified in draft-irtf-cfrg-rsa-guidance-04.
+/// The KDK is used to generate deterministic pseudo-random messages for implicit rejection.
+///
+/// # Arguments
+/// * `private_exponent` - The RSA private exponent (d)
+/// * `ciphertext` - The ciphertext being decrypted (must be exactly k bytes)
+///
+/// # Returns
+/// A 32-byte KDK derived from HMAC-SHA256(SHA256(I2OSP(d, k)), ciphertext)
+#[inline]
+pub(crate) fn derive_kdk(private_exponent: &BoxedUint, ciphertext: &[u8]) -> [u8; 32] {
+    // k = modulus size in bytes (ciphertext must be exactly k bytes per RFC 8017)
+    let k = ciphertext.len();
+
+    // Convert private exponent to bytes with I2OSP(d, k) - left-pad to k bytes
+    // Wrap in Zeroizing to ensure sensitive key material is cleared from memory
+    let d_raw = Zeroizing::new(private_exponent.to_be_bytes());
+    let mut d_bytes = Zeroizing::new(vec![0u8; k]);
+    // Left-pad: copy d_raw to the end of d_bytes
+    let start = k.saturating_sub(d_raw.len());
+    let copy_len = d_raw.len().min(k);
+    d_bytes[start..start + copy_len].copy_from_slice(&d_raw[d_raw.len() - copy_len..]);
+
+    // Hash the private exponent (DH = SHA256(D))
+    let dh = Sha256::digest(&*d_bytes);
+
+    // HMAC with ciphertext to create KDK
+    let mut mac = HmacSha256::new_from_slice(&dh).expect("HMAC can take key of any size");
+    Mac::update(&mut mac, ciphertext);
+
+    Mac::finalize(mac).into_bytes().into()
+}
+
+/// Selects an alternative (synthetic) message length from pseudo-random candidates.
+///
+/// This function derives a message length in the valid range [0, max_message_length]
+/// from pseudo-random input. The selection is performed in constant-time.
+///
+/// # Arguments
+/// * `length_candidates` - 256 bytes of pseudo-random data from IRPRF
+/// * `k` - The modulus size in bytes
+///
+/// # Returns
+/// A message length in the range [0, k-11]
+#[inline]
+fn select_alternative_length(length_candidates: &[u8], k: usize) -> u32 {
+    // Maximum message length for PKCS#1 v1.5 is k - 11
+    let max_message_length = k.saturating_sub(11) as u32;
+
+    // Use first 4 bytes as u32
+    let mut candidate = u32::from_be_bytes([
+        length_candidates[0],
+        length_candidates[1],
+        length_candidates[2],
+        length_candidates[3],
+    ]);
+
+    // Modulo to ensure candidate is in valid range
+    // This is acceptable as the distribution is close enough to uniform
+    // for cryptographic purposes when max_message_length is not a power of 2
+    if max_message_length > 0 {
+        candidate %= max_message_length + 1;
+    } else {
+        candidate = 0;
+    }
+
+    candidate
+}
+
+/// Removes the encryption padding scheme from PKCS#1 v1.5 using implicit rejection.
+///
+/// This function implements the implicit rejection technique as specified in
+/// draft-irtf-cfrg-rsa-guidance-04 to mitigate the Marvin attack (RUSTSEC-2023-0071).
+///
+/// Instead of returning an error when padding validation fails, this function returns
+/// a deterministic pseudo-random message. This makes valid and invalid ciphertexts
+/// indistinguishable in timing and memory access patterns, preventing padding oracle attacks.
+///
+/// # Arguments
+/// * `em` - The encoded message after RSA decryption
+/// * `k` - The modulus size in bytes
+/// * `kdk` - The Key Derivation Key derived from private exponent and ciphertext
+///
+/// # Returns
+/// Either the actual decrypted message (if padding is valid) or a synthetic pseudo-random
+/// message (if padding is invalid). This function never returns an error based on padding
+/// validity.
+#[inline]
+pub(crate) fn pkcs1v15_encrypt_unpad(em: Vec<u8>, k: usize, kdk: &[u8; 32]) -> Vec<u8> {
+    let (valid, out, index) = match decrypt_inner(em, k) {
+        Ok(result) => result,
+        // If k < 11, decrypt_inner returns error - handle safely
+        Err(_) => (0, vec![0; k], 0),
+    };
+
+    // Generate synthetic message and length using IRPRF
+    let synthetic_full = irprf(kdk, b"message", k);
+    let length_candidates = irprf(kdk, b"length", 256);
+    let synthetic_length = select_alternative_length(&length_candidates, k) as usize;
+
+    // Calculate actual message length
+    let actual_length = (k as u32).saturating_sub(index) as usize;
+
+    // Extract message portions
+    // CRITICAL: Must access both memory locations regardless of validity
+    let synthetic_start = k.saturating_sub(synthetic_length);
+    let synthetic_message = &synthetic_full[synthetic_start..];
+    let actual_message = &out[index as usize..];
+
+    // Constant-time selection of length
+    let valid_choice = Choice::from_u8_lsb(valid);
+    let output_length =
+        usize::ct_select(&synthetic_length, &actual_length, valid_choice);
+
+    // Constant-time selection of message
+    // This ensures both actual and synthetic messages are accessed
+    let mut output = vec![0u8; output_length];
+    for i in 0..output_length {
+        let syn_byte = if i < synthetic_message.len() {
+            synthetic_message[i]
+        } else {
+            0u8
+        };
+        let act_byte = if i < actual_message.len() {
+            actual_message[i]
+        } else {
+            0u8
+        };
+        output[i] = u8::ct_select(&syn_byte, &act_byte, valid_choice);
+    }
+
+    output
 }
 
 /// Removes the PKCS1v15 padding It returns one or zero in valid that indicates whether the
