@@ -8,12 +8,12 @@
 use std::fs::File;
 
 use pkcs1::DecodeRsaPublicKey;
-use rsa::{
+use rstest::rstest;
+use sad_rsa::{
     pkcs1v15, pss,
     signature::{Error as SignatureError, Verifier},
     RsaPublicKey,
 };
-use rstest::rstest;
 use serde::Deserialize;
 use sha1::Sha1;
 use sha2::{Sha224, Sha256, Sha384, Sha512};
@@ -218,7 +218,7 @@ fn test_rsa_pss_verify(#[case] file: &str) {
     for group in tests.groups {
         summary.group(&group);
 
-        let key = rsa::RsaPublicKey::from_pkcs1_der(&group.public_key_asn).unwrap();
+        let key = sad_rsa::RsaPublicKey::from_pkcs1_der(&group.public_key_asn).unwrap();
         println!("key is {:?}", key);
 
         for test in group.tests {

@@ -57,10 +57,13 @@ fn test_valid_ciphertext_decrypts_correctly() {
         let ciphertext = RandomizedEncryptor::encrypt_with_rng(&encrypting_key, &mut rng, &message)
             .expect("encryption should succeed");
 
-        let decrypted = Decryptor::decrypt(&decrypting_key, &ciphertext)
-            .expect("decryption should succeed");
+        let decrypted =
+            Decryptor::decrypt(&decrypting_key, &ciphertext).expect("decryption should succeed");
 
-        assert_eq!(message, decrypted, "Valid ciphertext should decrypt to original message");
+        assert_eq!(
+            message, decrypted,
+            "Valid ciphertext should decrypt to original message"
+        );
     }
 }
 
@@ -74,10 +77,19 @@ fn test_invalid_ciphertext_returns_synthetic_message() {
 
     let result = Decryptor::decrypt(&decrypting_key, &invalid_ciphertext);
 
-    assert!(result.is_ok(), "Invalid ciphertext should return synthetic message, not error");
+    assert!(
+        result.is_ok(),
+        "Invalid ciphertext should return synthetic message, not error"
+    );
     let synthetic_message = result.unwrap();
-    assert!(!synthetic_message.is_empty(), "Synthetic message should not be empty");
-    assert!(synthetic_message.len() <= k - 11, "Synthetic message length should be <= k-11");
+    assert!(
+        !synthetic_message.is_empty(),
+        "Synthetic message should not be empty"
+    );
+    assert!(
+        synthetic_message.len() <= k - 11,
+        "Synthetic message length should be <= k-11"
+    );
 }
 
 #[test]
@@ -89,12 +101,21 @@ fn test_deterministic_synthetic_messages() {
     let mut invalid_ciphertext = vec![0u8; k];
     invalid_ciphertext[0] = 0x01; // Small value < n
 
-    let result1 = Decryptor::decrypt(&decrypting_key, &invalid_ciphertext).expect("should return synthetic message");
-    let result2 = Decryptor::decrypt(&decrypting_key, &invalid_ciphertext).expect("should return synthetic message");
-    let result3 = Decryptor::decrypt(&decrypting_key, &invalid_ciphertext).expect("should return synthetic message");
+    let result1 = Decryptor::decrypt(&decrypting_key, &invalid_ciphertext)
+        .expect("should return synthetic message");
+    let result2 = Decryptor::decrypt(&decrypting_key, &invalid_ciphertext)
+        .expect("should return synthetic message");
+    let result3 = Decryptor::decrypt(&decrypting_key, &invalid_ciphertext)
+        .expect("should return synthetic message");
 
-    assert_eq!(result1, result2, "Same invalid ciphertext should produce same synthetic message");
-    assert_eq!(result2, result3, "Synthetic message should be deterministic");
+    assert_eq!(
+        result1, result2,
+        "Same invalid ciphertext should produce same synthetic message"
+    );
+    assert_eq!(
+        result2, result3,
+        "Synthetic message should be deterministic"
+    );
 }
 
 #[test]
@@ -109,10 +130,15 @@ fn test_different_invalid_ciphertexts_produce_different_synthetic_messages() {
     let mut invalid_ct2 = vec![0u8; k];
     invalid_ct2[0] = 0x02;
 
-    let synthetic1 = Decryptor::decrypt(&decrypting_key, &invalid_ct1).expect("should return synthetic message");
-    let synthetic2 = Decryptor::decrypt(&decrypting_key, &invalid_ct2).expect("should return synthetic message");
+    let synthetic1 =
+        Decryptor::decrypt(&decrypting_key, &invalid_ct1).expect("should return synthetic message");
+    let synthetic2 =
+        Decryptor::decrypt(&decrypting_key, &invalid_ct2).expect("should return synthetic message");
 
-    assert_ne!(synthetic1, synthetic2, "Different invalid ciphertexts should produce different synthetic messages");
+    assert_ne!(
+        synthetic1, synthetic2,
+        "Different invalid ciphertexts should produce different synthetic messages"
+    );
 }
 
 #[test]
@@ -131,7 +157,10 @@ fn test_invalid_padding_corruption() {
     corrupted[k - 5] ^= 0xFF;
 
     let result = Decryptor::decrypt(&decrypting_key, &corrupted);
-    assert!(result.is_ok(), "Corrupted ciphertext should return synthetic message");
+    assert!(
+        result.is_ok(),
+        "Corrupted ciphertext should return synthetic message"
+    );
 }
 
 #[test]
@@ -151,10 +180,17 @@ fn test_short_padding_string() {
     em[10] = 0xAA;
 
     let result = Decryptor::decrypt(&decrypting_key, &em);
-    assert!(result.is_ok(), "Short padding should return synthetic message");
+    assert!(
+        result.is_ok(),
+        "Short padding should return synthetic message"
+    );
 
     let result2 = Decryptor::decrypt(&decrypting_key, &em);
-    assert_eq!(result.unwrap(), result2.unwrap(), "Deterministic synthetic message");
+    assert_eq!(
+        result.unwrap(),
+        result2.unwrap(),
+        "Deterministic synthetic message"
+    );
 }
 
 #[test]
@@ -173,7 +209,10 @@ fn test_wrong_first_byte() {
     em[12] = 0xAA;
 
     let result = Decryptor::decrypt(&decrypting_key, &em);
-    assert!(result.is_ok(), "Wrong first byte should return synthetic message");
+    assert!(
+        result.is_ok(),
+        "Wrong first byte should return synthetic message"
+    );
 }
 
 #[test]
@@ -192,7 +231,10 @@ fn test_wrong_second_byte() {
     em[12] = 0xAA;
 
     let result = Decryptor::decrypt(&decrypting_key, &em);
-    assert!(result.is_ok(), "Wrong second byte should return synthetic message");
+    assert!(
+        result.is_ok(),
+        "Wrong second byte should return synthetic message"
+    );
 }
 
 #[test]
@@ -212,7 +254,10 @@ fn test_zero_in_padding_string() {
     em[12] = 0xAA;
 
     let result = Decryptor::decrypt(&decrypting_key, &em);
-    assert!(result.is_ok(), "Zero in padding string should return synthetic message");
+    assert!(
+        result.is_ok(),
+        "Zero in padding string should return synthetic message"
+    );
 }
 
 #[test]
@@ -229,7 +274,10 @@ fn test_no_separator_byte() {
     }
 
     let result = Decryptor::decrypt(&decrypting_key, &em);
-    assert!(result.is_ok(), "Missing separator should return synthetic message");
+    assert!(
+        result.is_ok(),
+        "Missing separator should return synthetic message"
+    );
 }
 
 #[test]
@@ -251,7 +299,10 @@ fn test_synthetic_message_unpredictability() {
 
     for i in 0..synthetic_messages.len() {
         for j in i + 1..synthetic_messages.len() {
-            assert_ne!(synthetic_messages[i], synthetic_messages[j], "Synthetic messages should all be different");
+            assert_ne!(
+                synthetic_messages[i], synthetic_messages[j],
+                "Synthetic messages should all be different"
+            );
         }
     }
 }
@@ -270,14 +321,26 @@ fn test_valid_and_invalid_mixed() {
 
     let invalid_ct = vec![0x01; k]; // Small values < n
 
-    let valid_result = Decryptor::decrypt(&decrypting_key, &valid_ct).expect("valid ciphertext should decrypt");
-    assert_eq!(valid_result, message, "Valid message should decrypt correctly");
+    let valid_result =
+        Decryptor::decrypt(&decrypting_key, &valid_ct).expect("valid ciphertext should decrypt");
+    assert_eq!(
+        valid_result, message,
+        "Valid message should decrypt correctly"
+    );
 
-    let invalid_result = Decryptor::decrypt(&decrypting_key, &invalid_ct).expect("invalid ciphertext should return synthetic message");
-    assert_ne!(invalid_result, message, "Invalid ciphertext should not decrypt to original message");
+    let invalid_result = Decryptor::decrypt(&decrypting_key, &invalid_ct)
+        .expect("invalid ciphertext should return synthetic message");
+    assert_ne!(
+        invalid_result, message,
+        "Invalid ciphertext should not decrypt to original message"
+    );
 
-    let valid_result2 = Decryptor::decrypt(&decrypting_key, &valid_ct).expect("valid ciphertext should still decrypt");
-    assert_eq!(valid_result2, message, "Valid message should still decrypt correctly");
+    let valid_result2 = Decryptor::decrypt(&decrypting_key, &valid_ct)
+        .expect("valid ciphertext should still decrypt");
+    assert_eq!(
+        valid_result2, message,
+        "Valid message should still decrypt correctly"
+    );
 }
 
 #[test]
@@ -296,7 +359,10 @@ fn test_ciphertext_length_variations() {
 
     let exact_ct = vec![0x01; k]; // Valid length, < n, but invalid padding
     let result = Decryptor::decrypt(&decrypting_key, &exact_ct);
-    assert!(result.is_ok(), "Exact size invalid ciphertext should return synthetic message");
+    assert!(
+        result.is_ok(),
+        "Exact size invalid ciphertext should return synthetic message"
+    );
 }
 
 #[test]
@@ -311,10 +377,15 @@ fn test_kdk_derivation_varies_with_ciphertext() {
     let mut ct2 = vec![0x01; k];
     ct2[k - 1] = 0x20;
 
-    let synthetic1 = Decryptor::decrypt(&decrypting_key, &ct1).expect("should return synthetic message");
-    let synthetic2 = Decryptor::decrypt(&decrypting_key, &ct2).expect("should return synthetic message");
+    let synthetic1 =
+        Decryptor::decrypt(&decrypting_key, &ct1).expect("should return synthetic message");
+    let synthetic2 =
+        Decryptor::decrypt(&decrypting_key, &ct2).expect("should return synthetic message");
 
-    assert_ne!(synthetic1, synthetic2, "Different ciphertexts should produce different synthetic messages");
+    assert_ne!(
+        synthetic1, synthetic2,
+        "Different ciphertexts should produce different synthetic messages"
+    );
 }
 
 #[test]
@@ -335,7 +406,12 @@ fn test_synthetic_message_length_variations() {
     }
 
     for &len in &lengths {
-        assert!(len <= k - 11, "Synthetic message length {} should be <= {}", len, k - 11);
+        assert!(
+            len <= k - 11,
+            "Synthetic message length {} should be <= {}",
+            len,
+            k - 11
+        );
     }
 }
 
@@ -353,7 +429,11 @@ fn test_implicit_rejection_with_blinding() {
     let decrypted = RandomizedDecryptor::decrypt_with_rng(&decrypting_key, &mut rng, &valid_ct)
         .expect("decryption with blinding should succeed");
 
-    assert_eq!(message, decrypted.as_slice(), "Blinded decryption should work correctly");
+    assert_eq!(
+        message,
+        decrypted.as_slice(),
+        "Blinded decryption should work correctly"
+    );
 
     let k = 64;
     let invalid_ct = vec![0x01; k]; // Small values < n
@@ -363,5 +443,8 @@ fn test_implicit_rejection_with_blinding() {
     let synthetic2 = RandomizedDecryptor::decrypt_with_rng(&decrypting_key, &mut rng, &invalid_ct)
         .expect("should be deterministic");
 
-    assert_eq!(synthetic, synthetic2, "Synthetic message should be deterministic even with blinding");
+    assert_eq!(
+        synthetic, synthetic2,
+        "Synthetic message should be deterministic even with blinding"
+    );
 }

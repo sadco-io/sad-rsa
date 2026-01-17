@@ -9,7 +9,7 @@
 use alloc::vec::Vec;
 use const_oid::AssociatedOid;
 use crypto_bigint::{BoxedUint, Choice, CtEq, CtSelect};
-use digest::{Digest, Mac, KeyInit};
+use digest::{Digest, KeyInit, Mac};
 use hmac::Hmac;
 use rand_core::TryCryptoRng;
 use sha2::Sha256;
@@ -210,8 +210,7 @@ pub(crate) fn pkcs1v15_encrypt_unpad(em: Vec<u8>, k: usize, kdk: &[u8; 32]) -> V
 
     // Constant-time selection of length
     let valid_choice = Choice::from_u8_lsb(valid);
-    let output_length =
-        usize::ct_select(&synthetic_length, &actual_length, valid_choice);
+    let output_length = usize::ct_select(&synthetic_length, &actual_length, valid_choice);
 
     // Constant-time selection of message
     // This ensures both actual and synthetic messages are accessed
