@@ -5,8 +5,8 @@ fn signature_stringify() {
     use pkcs8::DecodePrivateKey;
     use signature::Signer;
 
-    use rsa::pkcs1v15::SigningKey;
-    use rsa::RsaPrivateKey;
+    use sad_rsa::pkcs1v15::SigningKey;
+    use sad_rsa::RsaPrivateKey;
 
     let pem = include_str!("examples/pkcs8/rsa2048-priv.pem");
     let private_key = RsaPrivateKey::from_pkcs8_pem(pem).unwrap();
@@ -26,7 +26,7 @@ fn signature_stringify() {
 #[test]
 fn signing_key_new_same_as_from() {
     use pkcs1::DecodeRsaPrivateKey;
-    use rsa::RsaPrivateKey;
+    use sad_rsa::RsaPrivateKey;
     use signature::{Keypair, Signer, Verifier};
 
     // randomly generated key, hardcoded for test repeatability
@@ -62,8 +62,8 @@ Rmb665iB5fwpqmbE/hYKIn7asYQE+V0dkgt8M3qvlJJ5JJbCrJx3
 
     let msg = b"1234";
 
-    let key_via_new = rsa::pkcs1v15::SigningKey::<sha2::Sha256>::new(priv_key.clone());
-    let key_via_from = rsa::pkcs1v15::SigningKey::<sha2::Sha256>::from(priv_key.clone());
+    let key_via_new = sad_rsa::pkcs1v15::SigningKey::<sha2::Sha256>::new(priv_key.clone());
+    let key_via_from = sad_rsa::pkcs1v15::SigningKey::<sha2::Sha256>::from(priv_key.clone());
     let sig_via_new = key_via_new.sign(msg);
     let sig_via_from = key_via_from.sign(msg);
     assert_eq!(sig_via_new, sig_via_from);

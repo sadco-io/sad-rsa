@@ -5,7 +5,7 @@
 use proptest::prelude::*;
 use rand::rngs::ChaCha8Rng;
 use rand_core::SeedableRng;
-use rsa::{
+use sad_rsa::{
     pkcs1v15,
     signature::{Keypair, SignatureEncoding, Signer, Verifier},
     RsaPrivateKey,

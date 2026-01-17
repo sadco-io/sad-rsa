@@ -4,14 +4,14 @@
 
 use crypto_bigint::{BoxedUint, CtEq};
 use hex_literal::hex;
-use rsa::{
+use sad_rsa::{
     pkcs1::{DecodeRsaPrivateKey, DecodeRsaPublicKey, EncodeRsaPrivateKey, EncodeRsaPublicKey},
     traits::{PrivateKeyParts, PublicKeyParts},
     RsaPrivateKey, RsaPublicKey,
 };
 
 #[cfg(feature = "encoding")]
-use rsa::pkcs1::LineEnding;
+use sad_rsa::pkcs1::LineEnding;
 
 /// RSA-2048 PKCS#1 private key encoded as ASN.1 DER.
 ///

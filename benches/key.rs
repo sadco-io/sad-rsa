@@ -7,7 +7,7 @@ use crypto_bigint::BoxedUint;
 use hex_literal::hex;
 use rand::rngs::ChaCha8Rng;
 use rand_core::SeedableRng;
-use rsa::{Pkcs1v15Encrypt, Pkcs1v15Sign, RsaPrivateKey};
+use sad_rsa::{Pkcs1v15Encrypt, Pkcs1v15Sign, RsaPrivateKey};
 use sha2::{Digest, Sha256};
 use test::Bencher;
 
