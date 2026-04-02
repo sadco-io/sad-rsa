@@ -173,7 +173,14 @@ fn decrypt<R: TryCryptoRng + ?Sized>(
     let em = uint_to_zeroizing_be_pad(em, priv_key.size())?;
 
     // Use implicit rejection - never returns error based on padding validity
-    Ok(pkcs1v15_encrypt_unpad(em, priv_key.size(), &kdk))
+    // Move the Vec out of Zeroizing — the Zeroizing wrapper drops with an empty vec,
+    // and pkcs1v15_encrypt_unpad takes ownership for constant-time processing.
+    let mut em = em;
+    Ok(pkcs1v15_encrypt_unpad(
+        core::mem::take(&mut *em),
+        priv_key.size(),
+        &kdk,
+    ))
 }
 
 /// Calculates the signature of hashed using
@@ -199,7 +206,8 @@ fn sign<R: TryCryptoRng + ?Sized>(
     let em = pkcs1v15_sign_pad(prefix, hashed, priv_key.size())?;
 
     let em = BoxedUint::from_be_slice(&em, priv_key.n_bits_precision())?;
-    uint_to_zeroizing_be_pad(rsa_decrypt_and_check(priv_key, rng, &em)?, priv_key.size())
+    let mut sig = uint_to_zeroizing_be_pad(rsa_decrypt_and_check(priv_key, rng, &em)?, priv_key.size())?;
+    Ok(core::mem::take(&mut *sig))
 }
 
 /// Verifies an RSA PKCS#1 v1.5 signature.
