@@ -18,6 +18,19 @@ fn left_pad(input: &[u8], padded_len: usize) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// Returns a new Zeroizing vector of the given length, with 0s left padded.
+/// The returned buffer is securely zeroed when dropped.
+#[inline]
+fn left_pad_zeroizing(input: &[u8], padded_len: usize) -> Result<Zeroizing<Vec<u8>>> {
+    if input.len() > padded_len {
+        return Err(Error::InvalidPadLen);
+    }
+
+    let mut out = Zeroizing::new(vec![0u8; padded_len]);
+    out[padded_len - input.len()..].copy_from_slice(input);
+    Ok(out)
+}
+
 /// Converts input to the new vector of the given length, using BE and with 0s left padded.
 /// In some cases BoxedUint might already have leading zeroes, this function removes them
 /// before padding again.
@@ -31,13 +44,16 @@ pub(crate) fn uint_to_be_pad(input: BoxedUint, padded_len: usize) -> Result<Vec<
 /// In some cases BoxedUint might already have leading zeroes, this function removes them
 /// before padding again.
 #[inline]
-pub(crate) fn uint_to_zeroizing_be_pad(input: BoxedUint, padded_len: usize) -> Result<Vec<u8>> {
+pub(crate) fn uint_to_zeroizing_be_pad(
+    input: BoxedUint,
+    padded_len: usize,
+) -> Result<Zeroizing<Vec<u8>>> {
     let leading_zeros = input.leading_zeros() as usize / 8;
 
     let m = Zeroizing::new(input);
     let m = Zeroizing::new(m.to_be_bytes());
 
-    left_pad(&m[leading_zeros..], padded_len)
+    left_pad_zeroizing(&m[leading_zeros..], padded_len)
 }
 
 #[cfg(test)]
