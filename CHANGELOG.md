@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-04-02
+
+### Security
+
+- **RSA plaintext buffer now securely zeroed**: `uint_to_zeroizing_be_pad` returns
+  `Zeroizing<Vec<u8>>` instead of plain `Vec<u8>`. The raw RSA-decrypted block (`em`)
+  is now securely zeroed on drop across all decrypt paths (PKCS#1 v1.5, OAEP, PSS).
+
 ## [0.2.0] - 2026-04-02
 
 ### Security
