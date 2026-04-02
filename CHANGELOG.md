@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-04-02
+
+### Security
+
+- **Constant-time PS length check**: Replaced self-acknowledged "very likely not sufficient"
+  arithmetic shift trick with `ctutils::CtLt::ct_lt()` (branchless `overflowing_sub`).
+  Assembly verified: compiles to `cmpl + cmovbl` (no conditional jumps).
+- **Fixed-size buffer allocation**: Variable-length `vec![0u8; output_length]` leaked message
+  length via allocator timing. Now always allocates `k-11` bytes and iterates the full buffer
+  unconditionally. Validated by Marvin toolkit (12M decryptions, Friedman p=0.46).
+
+### Changed
+
+- Aligned `rand_core` dependency to `0.10.0-rc-3` (was `rc-2` in deps, `rc-3` in dev-deps)
+- CI now triggers on `main` branch (was `master`)
+- Added `.DS_Store`, `._*` to `.gitignore` and `exclude` in `Cargo.toml`
+- Added copyright notice header to `LICENSE-MIT`
+- Updated `rand::thread_rng()` to `rand::rng()` in README and doc examples
+
+### Added
+
+- Marvin toolkit timing analysis evidence in `tests/marvin/`
+
+## [0.1.1] - 2026-03-06
+
+### Changed
+
+- Use forked `crypto-primes` with `RngCore` trait bounds fix
+- Fix doc tests: replace `rsa::` with `sad_rsa::` imports
+- Bump version to 0.1.1
+
 ## [0.1.0] - 2026-01-16
 
 Initial release of `sad-rsa`, a security-hardened fork of the RustCrypto `rsa` crate.
