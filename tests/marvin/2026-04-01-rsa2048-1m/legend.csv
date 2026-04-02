@@ -1,0 +1,13 @@
+ID,Name
+0,header_only
+1,no_header_with_payload_48
+2,no_padding_48
+3,no_structure
+4,signature_padding_8
+5,valid_0
+6,valid_48
+7,valid_192
+8,valid_246
+9,valid_repeated_byte_payload_246_1
+10,valid_repeated_byte_payload_246_255
+11,zero_byte_in_padding_48_4
