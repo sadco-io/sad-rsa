@@ -206,7 +206,8 @@ fn sign<R: TryCryptoRng + ?Sized>(
     let em = pkcs1v15_sign_pad(prefix, hashed, priv_key.size())?;
 
     let em = BoxedUint::from_be_slice(&em, priv_key.n_bits_precision())?;
-    let mut sig = uint_to_zeroizing_be_pad(rsa_decrypt_and_check(priv_key, rng, &em)?, priv_key.size())?;
+    let mut sig =
+        uint_to_zeroizing_be_pad(rsa_decrypt_and_check(priv_key, rng, &em)?, priv_key.size())?;
     Ok(core::mem::take(&mut *sig))
 }
 
