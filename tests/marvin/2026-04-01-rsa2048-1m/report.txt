@@ -1,0 +1,13 @@
+tlsfuzzer analyse.py version 9 analysis
+Sign test mean p-value: 0.5453, median p-value: 0.6055, min p-value: 0.01128
+Friedman test (chisquare approximation) for all samples
+p-value: 0.4612011995775317
+Worst pair: 6(valid_48), 7(valid_192)
+Mean of differences: -1.80492e-07s, 95% CI: -3.51302e-07s, -1.395224e-08s (±1.687e-07s)
+Median of differences: 4.35000e-08s, 95% CI: 1.10000e-08s, 7.900000e-08s (±3.400e-08s)
+Trimmed mean (5%) of differences: -4.02397e-08s, 95% CI: -1.30365e-07s, 4.984700e-08s (±9.011e-08s)
+Trimmed mean (25%) of differences: 2.76700e-08s, 95% CI: -7.49034e-09s, 6.976978e-08s (±3.863e-08s)
+Trimmed mean (45%) of differences: 4.29604e-08s, 95% CI: 7.80032e-09s, 8.233207e-08s (±3.727e-08s)
+Trimean of differences: 3.07500e-08s, 95% CI: -1.00000e-08s, 7.525000e-08s (±4.262e-08s)
+Layperson explanation: Large confidence intervals detected, collecting more data necessary. Side channel leakage smaller than 3.400e-08s is possible
+For detailed report see rsa2048_repeat/report.csv

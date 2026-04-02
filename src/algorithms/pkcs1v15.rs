@@ -8,7 +8,7 @@
 
 use alloc::vec::Vec;
 use const_oid::AssociatedOid;
-use crypto_bigint::{BoxedUint, Choice, CtEq, CtSelect};
+use crypto_bigint::{BoxedUint, Choice, CtEq, CtLt, CtSelect};
 use digest::{Digest, KeyInit, Mac};
 use hmac::Hmac;
 use rand_core::TryCryptoRng;
@@ -194,6 +194,9 @@ pub(crate) fn pkcs1v15_encrypt_unpad(em: Vec<u8>, k: usize, kdk: &[u8; 32]) -> V
         Err(_) => (0, vec![0; k], 0),
     };
 
+    // Maximum possible message length for PKCS#1 v1.5: k - 11
+    let max_message_length = k.saturating_sub(11);
+
     // Generate synthetic message and length using IRPRF
     let synthetic_full = irprf(kdk, b"message", k);
     let length_candidates = irprf(kdk, b"length", 256);
@@ -202,34 +205,36 @@ pub(crate) fn pkcs1v15_encrypt_unpad(em: Vec<u8>, k: usize, kdk: &[u8; 32]) -> V
     // Calculate actual message length
     let actual_length = (k as u32).saturating_sub(index) as usize;
 
-    // Extract message portions
-    // CRITICAL: Must access both memory locations regardless of validity
-    let synthetic_start = k.saturating_sub(synthetic_length);
-    let synthetic_message = &synthetic_full[synthetic_start..];
-    let actual_message = &out[index as usize..];
-
     // Constant-time selection of length
     let valid_choice = Choice::from_u8_lsb(valid);
     let output_length = usize::ct_select(&synthetic_length, &actual_length, valid_choice);
 
-    // Constant-time selection of message
-    // This ensures both actual and synthetic messages are accessed
-    let mut output = vec![0u8; output_length];
-    for i in 0..output_length {
-        let syn_byte = if i < synthetic_message.len() {
-            synthetic_message[i]
-        } else {
-            0u8
-        };
-        let act_byte = if i < actual_message.len() {
-            actual_message[i]
-        } else {
-            0u8
-        };
-        output[i] = u8::ct_select(&syn_byte, &act_byte, valid_choice);
+    // SECURITY: Always allocate max_message_length to prevent allocator
+    // timing from leaking the actual message length.
+    let mut output = vec![0u8; max_message_length];
+
+    // SECURITY: Always iterate over the full max_message_length to prevent
+    // loop iteration count from leaking message length.
+    //
+    // Both `out` and `synthetic_full` have length k. We read right-aligned:
+    // position i in the output maps to position (k - max_message_length + i)
+    // in both source buffers, ranging from index 11 to k-1 — always in-bounds.
+    //
+    // The message bytes are right-aligned in the output buffer: the actual
+    // message occupies the last `actual_length` positions, and the synthetic
+    // message occupies the last `synthetic_length` positions. After the loop,
+    // we copy only the last `output_length` bytes to the result.
+    for (i, out_byte) in output.iter_mut().enumerate() {
+        let src_index = k - max_message_length + i;
+        let act_byte = out[src_index];
+        let syn_byte = synthetic_full[src_index];
+        *out_byte = u8::ct_select(&syn_byte, &act_byte, valid_choice);
     }
 
-    output
+    // Extract the last output_length bytes (right-aligned message).
+    // This is the only variable-time operation, happening after all CT work.
+    let start = max_message_length.saturating_sub(output_length);
+    output[start..].to_vec()
 }
 
 /// Removes the PKCS1v15 padding It returns one or zero in valid that indicates whether the
@@ -260,12 +265,9 @@ fn decrypt_inner(em: Vec<u8>, k: usize) -> Result<(u8, Vec<u8>, u32)> {
     }
 
     // The PS padding must be at least 8 bytes long, and it starts two
-    // bytes into em.
-    // TODO: WARNING: THIS MUST BE CONSTANT TIME CHECK:
-    // Ref: https://github.com/dalek-cryptography/subtle/issues/20
-    // This is currently copy & paste from the constant time impl in
-    // go, but very likely not sufficient.
-    let valid_ps = Choice::from_u8_lsb((((2i32 + 8i32 - index as i32 - 1i32) >> 31) & 1) as u8);
+    // bytes into em. The 0x00 separator must be at index >= 10.
+    // Uses ctutils::CtLt which compiles to branchless overflowing_sub.
+    let valid_ps = !index.ct_lt(&10u32);
     let valid = first_byte_is_zero & second_byte_is_two & !looking_for_index & valid_ps;
     index = u32::ct_select(&0, &(index + 1), valid);
 
