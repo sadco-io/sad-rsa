@@ -3,7 +3,9 @@
 use core::cmp::Ordering;
 
 use crypto_bigint::modular::{BoxedMontyForm, BoxedMontyParams};
-use crypto_bigint::{BoxedUint, ConcatenatingMul, ConcatenatingSquare, Gcd, NonZero, Odd, RandomMod, Resize};
+use crypto_bigint::{
+    BoxedUint, ConcatenatingMul, ConcatenatingSquare, Gcd, NonZero, Odd, RandomMod, Resize,
+};
 use rand_core::TryCryptoRng;
 use zeroize::Zeroize;
 
@@ -116,7 +118,8 @@ pub fn rsa_decrypt<R: TryCryptoRng + ?Sized>(
 
             // m = m2 + h.q
             let m2 = m2.try_resize(n.bits_precision()).ok_or(Error::Internal)?;
-            let hq = h.concatenating_mul(q)
+            let hq = h
+                .concatenating_mul(q)
                 .try_resize(n.bits_precision())
                 .ok_or(Error::Internal)?;
             m2.wrapping_add(&hq)
@@ -284,7 +287,9 @@ pub fn recover_primes(
 
     let four = BoxedUint::from(4u32);
     let b_squared = b.concatenating_square();
-    let four_n = n.concatenating_mul(four).resize_unchecked(b_squared.bits_precision());
+    let four_n = n
+        .concatenating_mul(four)
+        .resize_unchecked(b_squared.bits_precision());
 
     if b_squared <= four_n {
         return Err(Error::InvalidArguments);

@@ -383,7 +383,11 @@ impl RsaPrivateKey {
                 // Check that the product of primes matches the modulus.
                 // This also ensures that `bit_precision` of each prime is <= that of the modulus,
                 // and `bit_precision` of their product is >= that of the modulus.
-                if primes.iter().fold(BoxedUint::one(), |acc, p| acc.concatenating_mul(p)) != n_c.as_ref() {
+                if primes
+                    .iter()
+                    .fold(BoxedUint::one(), |acc, p| acc.concatenating_mul(p))
+                    != n_c.as_ref()
+                {
                     return Err(Error::InvalidModulus);
                 }
             }
