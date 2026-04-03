@@ -8,7 +8,7 @@
 
 use alloc::vec::Vec;
 use const_oid::AssociatedOid;
-use crypto_bigint::{BoxedUint, Choice, CtEq, CtLt, CtSelect};
+use crypto_bigint::{BoxedUint, Choice, CtAssign, CtEq, CtLt, CtSelect};
 use digest::{Digest, KeyInit, Mac};
 use hmac::Hmac;
 use rand_core::TryCryptoRng;
