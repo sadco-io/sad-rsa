@@ -6,7 +6,7 @@
 
 use crypto_bigint::BoxedUint;
 use rand::rngs::ChaCha8Rng;
-use rand_core::{RngCore, SeedableRng};
+use rand_core::{Rng, SeedableRng};
 use sad_rsa::pkcs1v15::DecryptingKey;
 use sad_rsa::traits::{Decryptor, EncryptingKeypair, RandomizedDecryptor, RandomizedEncryptor};
 use sad_rsa::RsaPrivateKey;

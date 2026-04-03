@@ -4,7 +4,7 @@ use core::fmt;
 use core::hash::{Hash, Hasher};
 
 use crypto_bigint::modular::{BoxedMontyForm, BoxedMontyParams};
-use crypto_bigint::{BoxedUint, Integer, NonZero, Odd, Resize};
+use crypto_bigint::{BoxedUint, ConcatenatingMul, Integer, NonZero, Odd, Resize};
 use rand_core::CryptoRng;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 #[cfg(feature = "serde")]
@@ -383,7 +383,11 @@ impl RsaPrivateKey {
                 // Check that the product of primes matches the modulus.
                 // This also ensures that `bit_precision` of each prime is <= that of the modulus,
                 // and `bit_precision` of their product is >= that of the modulus.
-                if &primes.iter().fold(BoxedUint::one(), |acc, p| acc * p) != n_c.as_ref() {
+                if primes
+                    .iter()
+                    .fold(BoxedUint::one(), |acc, p| acc.concatenating_mul(p))
+                    != n_c.as_ref()
+                {
                     return Err(Error::InvalidModulus);
                 }
             }
@@ -500,12 +504,12 @@ impl RsaPrivateKey {
             .ok_or(Error::InvalidPrime)?;
         let q_params = BoxedMontyParams::new(q_odd);
 
-        let x = NonZero::new(p.wrapping_sub(&BoxedUint::one()))
+        let x = NonZero::new(p.wrapping_sub(BoxedUint::one()))
             .into_option()
             .ok_or(Error::InvalidPrime)?;
         let dp = d.rem_vartime(&x);
 
-        let x = NonZero::new(q.wrapping_sub(&BoxedUint::one()))
+        let x = NonZero::new(q.wrapping_sub(BoxedUint::one()))
             .into_option()
             .ok_or(Error::InvalidPrime)?;
         let dq = d.rem_vartime(&x);
@@ -582,10 +586,10 @@ impl RsaPrivateKey {
         // inverse. Therefore e is coprime to lcm(p-1,q-1,r-1,...) =
         // exponent(ℤ/nℤ). It also implies that a^de ≡ a mod p as a^(p-1) ≡ 1
         // mod p. Thus a^de ≡ a mod n for all a coprime to n, as required.
-        let de = self.d.mul(&self.pubkey_components.e);
+        let de = self.d.concatenating_mul(&self.pubkey_components.e);
 
         for prime in &self.primes {
-            let x = NonZero::new(prime.wrapping_sub(&BoxedUint::one())).unwrap();
+            let x = NonZero::new(prime.wrapping_sub(BoxedUint::one())).unwrap();
             let congruence = de.rem_vartime(&x);
             if !bool::from(congruence.is_one()) {
                 return Err(Error::InvalidExponent);
