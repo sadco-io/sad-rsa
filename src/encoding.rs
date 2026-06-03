@@ -227,7 +227,10 @@ impl EncodePublicKey for RsaPublicKey {
 fn pkcs1_error_to_pkcs8(error: pkcs1::Error) -> pkcs8::Error {
     match error {
         pkcs1::Error::Asn1(e) => pkcs8::Error::Asn1(e),
-        _ => pkcs8::Error::KeyMalformed,
+        // pkcs8 0.11.0 made `KeyMalformed` a tuple variant carrying a `KeyError`.
+        // A non-ASN.1 pkcs1 error means the key data itself is malformed, which
+        // maps to the generic `KeyError::Invalid`.
+        _ => pkcs8::Error::KeyMalformed(pkcs8::KeyError::Invalid),
     }
 }
 
