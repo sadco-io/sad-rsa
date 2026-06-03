@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-06-03
+
+### Changed
+
+- Upgraded `pkcs8` from `0.11.0-rc.11` to stable `0.11.0`. `pkcs8 0.11.0` changed
+  `Error::KeyMalformed` from a unit variant to a tuple variant `KeyMalformed(KeyError)`;
+  non-ASN.1 PKCS#1 errors are now mapped to `KeyMalformed(KeyError::Invalid)`. This also
+  resolves the PKCS#5 encryption stack (`aead` / `aes-gcm` / etc.) to stable releases. (#35)
+- Upgraded `signature` from `3.0.0-rc.10` to stable `3.0.0`
+- Upgraded `spki` from `0.8.0-rc.4` to stable `0.8.0`
+- Bumped dev-dependencies: `sha3` `0.11` -> `0.12`, `serde_json` `1.0.138` -> `1.0.150`
+- Bumped `crate-ci/typos` CI action `1.44.0` -> `1.47.0`
+
 ## [0.2.2] - 2026-04-02
 
 ### Changed
