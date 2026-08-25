@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-08-25
+
+### Security
+
+- Upgraded `crypto-bigint` `0.7.3` -> `0.7.5`. Intermediate release `0.7.4` was **yanked**
+  upstream for a truncated Karatsuba carry (RustCrypto/crypto-bigint#1305) producing silently
+  incorrect multiplication results; `0.7.5` carries the fix. `0.7.5` additionally preserves the
+  `NonZero` and `Odd` invariants in its `Zeroize` impls (#1287), which directly backs this
+  crate's zeroization guarantees for private key material.
+
+### Changed
+
+- Upgraded `crypto-primes` `0.7.0` -> `0.7.2` (vendors the previously-required `libm`
+  functions, removing `libm` from the dependency tree; gates heap allocation behind `alloc`).
+- Refreshed all semver-compatible dependencies: `getrandom` `0.4.2` -> `0.4.3`,
+  `zeroize` `1.8.2` -> `1.9.0`, `der` `0.8.0` -> `0.8.1`, `hybrid-array` `0.4.10` -> `0.4.14`,
+  plus dev-only bumps (`rand` `0.10.1` -> `0.10.2`, `serde_json` `1.0.150` -> `1.0.151`,
+  `futures-util` `0.3.32` -> `0.3.34`).
+- Removed a redundant `sha2` `[dev-dependencies]` entry that duplicated the mandatory
+  `[dependencies]` entry verbatim. The `sha1` dev-dependency is retained -- the regular
+  `sha1` dependency is optional, so tests still need their own.
+
+### Notes
+
+- `pkcs1` remains pinned to `0.8.0-rc.4`; upstream has not yet published `0.8.0` stable.
+  It is the last pre-release dependency, and it is reachable from the default feature set
+  via `encoding`. See #18.
+
 ## [0.2.3] - 2026-06-03
 
 ### Changed
