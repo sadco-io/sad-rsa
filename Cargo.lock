@@ -764,7 +764,7 @@ dependencies = [
 
 [[package]]
 name = "sad-rsa"
-version = "0.2.4"
+version = "0.10.0"
 dependencies = [
  "base64ct",
  "const-oid",

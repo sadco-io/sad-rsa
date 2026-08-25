@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-08-25
+
+### Changed — version realignment
+
+- **The version number now tracks the upstream API line it targets.** `sad-rsa`
+  was forked from RustCrypto's `rsa` at `0.10.0-rc.12` and has always tracked the
+  **0.10** API, but shipped under `0.1.x`/`0.2.x` version numbers. That mismatch
+  led users to assume compatibility with the released `rsa` 0.9.x and hit a wall
+  (sadco-io/sad-rsa#44). From this release, **`sad-rsa 0.10.x` targets `rsa 0.10.x`**.
+- **This is a version-numbering change, not an API change.** There are no breaking
+  API changes from `0.2.3`/`0.2.4`; the code is the same. Because Cargo treats
+  `0.2` and `0.10` as incompatible ranges, existing `0.2.x` users will not receive
+  this via `cargo update` and must bump the requirement to `"0.10"` by hand. No
+  code changes are required to do so.
+- Upstream has not yet published `rsa 0.10.0` final; the newest upstream release is
+  `0.10.0-rc.18`. This crate's API was verified against `rc.18`. One known drift:
+  upstream added `Error::InputSize` after `rc.12` where this crate returns
+  `Error::Decryption`.
+
+### Fixed — documentation
+
+- **The README claimed "The API is fully compatible with the upstream `rsa` crate"
+  and gave a two-step migration** (swap the dependency, rename `use` paths). That was
+  false for every *released* version of `rsa`. Measured: a test crate exercising ten
+  `rsa 0.9.10` API surfaces builds clean against 0.9.10, and the documented migration
+  produces **14 compile errors** — six of the ten surfaces break at compile time, two
+  more change behaviour under implicit rejection. The README now states the version-line
+  contract plainly and carries a real migration guide with a difference table and
+  before/after code, split by whether you are coming from `0.10-rc` (rename only) or
+  `0.9.x` (ecosystem upgrade).
+- The README's install snippet said `sad-rsa = "0.1"`, and its example passed
+  `features = ["pem"]`, which does not exist in this crate and fails at dependency
+  resolution.
+
 ## [0.2.4] - 2026-08-25
 
 ### Security

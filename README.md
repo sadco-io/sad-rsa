@@ -29,13 +29,13 @@ Implementation follows [draft-irtf-cfrg-rsa-guidance-04][irtf-guidance].
 
 ```toml
 [dependencies]
-sad-rsa = "0.2"
+sad-rsa = "0.10"
 ```
 
-The API matches the upstream `rsa` **0.10 pre-release line** (this crate was
-forked at `rsa 0.10.0-rc.12`). It is **not** API-compatible with the released
-`rsa` 0.9.x — see [Compatibility](#compatibility-with-the-rsa-crate) below
-before migrating.
+**`sad-rsa` tracks the upstream `rsa` 0.10.x API line, and its version number
+says so:** `sad-rsa 0.10.x` is API-compatible with `rsa 0.10.x`. It is **not**
+API-compatible with the released `rsa` 0.9.x — see
+[Compatibility](#compatibility-with-the-rsa-crate) before migrating.
 
 ```rust
 use sad_rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
@@ -57,8 +57,17 @@ assert_eq!(&data[..], &dec_data[..]);
 
 ## Compatibility with the `rsa` crate
 
-`sad-rsa` was forked from [RustCrypto/RSA][rustcrypto-rsa] at version
-`0.10.0-rc.12` — the **unreleased 0.10 line**, not the released 0.9.x series.
+**Version-line contract: `sad-rsa 0.10.x` targets the `rsa 0.10.x` API.**
+The version numbers are aligned deliberately so the compatibility target is
+obvious from the dependency line alone.
+
+`sad-rsa` was forked from [RustCrypto/RSA][rustcrypto-rsa] at `0.10.0-rc.12`
+and tracks the **0.10 line**, not the released 0.9.x series. Note that upstream
+has not yet published `0.10.0` final — the newest upstream release is
+`0.10.0-rc.18`. This crate's API was verified against `rc.18`; the one known
+drift is that upstream added `Error::InputSize` after rc.12 where this crate
+returns `Error::Decryption`. If upstream's `0.10.0` final diverges from the
+release candidates, a matching `sad-rsa` release will follow.
 Upstream 0.10 replaced the bignum backend (`num-bigint-dig` → `crypto-bigint`)
 and moved to new major versions of the `rand_core`, `digest`, `sha2`,
 `signature`, `pkcs1`, and `pkcs8` ecosystems. All of those API changes are
@@ -77,7 +86,7 @@ added after rc.12, e.g. `Error::InputSize` where this crate returns
 This is the same amount of work as upgrading to the upstream 0.10
 pre-releases. The changes you will hit:
 
-| What changed | `rsa` 0.9.x | `sad-rsa` 0.2 |
+| What changed | `rsa` 0.9.x | `sad-rsa` 0.10 |
 |---|---|---|
 | Big-integer type | `rsa::BigUint` (from `num-bigint-dig`) | `sad_rsa::BoxedUint` (from `crypto-bigint`) |
 | RNG traits | `rand_core` 0.6 (`rand` 0.8, `rand::thread_rng()`) | `rand_core` 0.10 (`rand` 0.10, `rand::rng()`) |
@@ -94,7 +103,7 @@ Concretely, in `Cargo.toml`:
 rsa = { version = "0.9", features = ["sha2"] }
 rand = "0.8"                              # rand = "0.10"
 sha2 = "0.10"                             # sha2 = "0.11"
-                                          # sad-rsa = "0.2"
+                                          # sad-rsa = "0.10"
 ```
 
 And in code (illustrative before/after, not a complete program):
