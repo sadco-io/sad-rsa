@@ -27,14 +27,15 @@ Implementation follows [draft-irtf-cfrg-rsa-guidance-04][irtf-guidance].
 
 ## Usage
 
-Replace `rsa` with `sad-rsa` in your `Cargo.toml`:
-
 ```toml
 [dependencies]
-sad-rsa = "0.1"
+sad-rsa = "0.10"
 ```
 
-The API is fully compatible with the upstream `rsa` crate:
+**`sad-rsa` tracks the upstream `rsa` 0.10.x API line, and its version number
+says so:** `sad-rsa 0.10.x` is API-compatible with `rsa 0.10.x`. It is **not**
+API-compatible with the released `rsa` 0.9.x — see
+[Compatibility](#compatibility-with-the-rsa-crate) before migrating.
 
 ```rust
 use sad_rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
@@ -54,13 +55,90 @@ let dec_data = priv_key.decrypt(Pkcs1v15Encrypt, &enc_data).expect("failed to de
 assert_eq!(&data[..], &dec_data[..]);
 ```
 
-## Migration from `rsa`
+## Compatibility with the `rsa` crate
 
-1. Replace `rsa` with `sad-rsa` in `Cargo.toml`
-2. Replace `use rsa::` with `use sad_rsa::` in your code
-3. That's it - the API is identical
+**Version-line contract: `sad-rsa 0.10.x` targets the `rsa 0.10.x` API.**
+The version numbers are aligned deliberately so the compatibility target is
+obvious from the dependency line alone.
 
-**Note:** Invalid ciphertexts will now return synthetic messages instead of errors. If your code explicitly checks for decryption errors to detect tampering, you should use authenticated encryption (e.g., RSA-OAEP or hybrid encryption with AES-GCM) instead.
+`sad-rsa` was forked from [RustCrypto/RSA][rustcrypto-rsa] at `0.10.0-rc.12`
+and tracks the **0.10 line**, not the released 0.9.x series. Note that upstream
+has not yet published `0.10.0` final — the newest upstream release is
+`0.10.0-rc.18`. This crate's API was verified against `rc.18`; the one known
+drift is that upstream added `Error::InputSize` after rc.12 where this crate
+returns `Error::Decryption`. If upstream's `0.10.0` final diverges from the
+release candidates, a matching `sad-rsa` release will follow.
+Upstream 0.10 replaced the bignum backend (`num-bigint-dig` → `crypto-bigint`)
+and moved to new major versions of the `rand_core`, `digest`, `sha2`,
+`signature`, `pkcs1`, and `pkcs8` ecosystems. All of those API changes are
+inherited here.
+
+### Migrating from `rsa` 0.10.0-rc.x
+
+Replace the dependency and the crate name in `use` paths — the API is the
+same. (Verified against `rsa 0.10.0-rc.18`; behavioral differences are the
+implicit-rejection semantics described below, and error variants upstream
+added after rc.12, e.g. `Error::InputSize` where this crate returns
+`Error::Decryption`.)
+
+### Migrating from `rsa` 0.9.x
+
+This is the same amount of work as upgrading to the upstream 0.10
+pre-releases. The changes you will hit:
+
+| What changed | `rsa` 0.9.x | `sad-rsa` 0.10 |
+|---|---|---|
+| Big-integer type | `rsa::BigUint` (from `num-bigint-dig`) | `sad_rsa::BoxedUint` (from `crypto-bigint`) |
+| RNG traits | `rand_core` 0.6 (`rand` 0.8, `rand::thread_rng()`) | `rand_core` 0.10 (`rand` 0.10, `rand::rng()`) |
+| Digest traits | `digest`/`sha2` 0.10 | `digest`/`sha2` 0.11 |
+| Signature traits | `signature` 2.x | `signature` 3.0 |
+| Key encoding | `pkcs1` 0.7, `pkcs8` 0.10 | `pkcs1` 0.8.0-rc, `pkcs8` 0.11 (same trait names) |
+| Feature flags | `pem` feature | no `pem` feature — PEM is always on via the default `encoding` feature |
+| MSRV | 1.65 | 1.85 |
+
+Concretely, in `Cargo.toml`:
+
+```toml
+# before                                  # after
+rsa = { version = "0.9", features = ["sha2"] }
+rand = "0.8"                              # rand = "0.10"
+sha2 = "0.10"                             # sha2 = "0.11"
+                                          # sad-rsa = "0.10"
+```
+
+And in code (illustrative before/after, not a complete program):
+
+```rust,ignore
+// RNG: rand 0.8 types don't implement rand_core 0.10 traits
+let mut rng = rand::thread_rng();         // before (rand 0.8)
+let mut rng = rand::rng();                // after  (rand 0.10)
+
+// Key-component accessors: BigUint -> BoxedUint, and n() is NonZero-wrapped
+let n: &BigUint = key.n();                // before
+let n: &BoxedUint = key.n().as_ref();     // after
+
+// from_components / RsaPublicKey::new now take BoxedUint values
+// (BoxedUint has a fixed bit precision; build values with
+// BoxedUint::from_be_slice(bytes, bits) or similar)
+
+// OAEP: the digest moved from the constructor to the type
+let padding = Oaep::new::<Sha256>();      // before
+let padding = Oaep::<Sha256>::new();      // after
+
+// Signing keys require sha2 0.11 types (sha2 0.10's Sha256 will not
+// satisfy the Digest bound) and the signature 3.0 traits
+let sk = SigningKey::<Sha256>::new(key);  // same shape, new sha2/signature versions
+```
+
+Unchanged from 0.9.x: the `encrypt`/`decrypt` call shapes
+(`pub_key.encrypt(&mut rng, Pkcs1v15Encrypt, msg)`), the `pkcs1`/`pkcs8`
+encode/decode trait method names (`to_pkcs8_pem`, `from_pkcs1_der`, ...), and
+the `Error::Decryption`-style error variants (the enum has gained variants, so
+exhaustive matches need updating).
+
+### Behavioral change: implicit rejection
+
+**Note:** Invalid PKCS#1 v1.5 ciphertexts will now return synthetic messages instead of errors. If your code explicitly checks for decryption errors to detect tampering, you should use authenticated encryption (e.g., RSA-OAEP or hybrid encryption with AES-GCM) instead.
 
 ## Performance
 
