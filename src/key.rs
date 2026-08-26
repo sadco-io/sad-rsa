@@ -142,7 +142,11 @@ impl Zeroize for PrecomputedValues {
     fn zeroize(&mut self) {
         self.dp.zeroize();
         self.dq.zeroize();
-        // TODO: once these have landed in crypto-bigint
+        // Q^{-1} mod P. `BoxedMontyForm::zeroize` wipes the value, not the
+        // attached params (crypto-bigint documents this).
+        self.qinv.zeroize();
+        // TODO: `BoxedMontyParams` has no `Zeroize` in crypto-bigint 0.7.5.
+        // `p_params.modulus` / `q_params.modulus` are copies of the primes.
         // self.p_params.zeroize();
         // self.q_params.zeroize();
     }
@@ -787,6 +791,43 @@ mod tests {
         assert_eq!(PublicKeyParts::e(&public_key), &BoxedUint::from(200u64));
         assert_eq!(PublicKeyParts::e_bytes(&public_key), [200].into());
         assert_eq!(PublicKeyParts::n_bytes(&public_key), [101].into());
+    }
+
+    /// `PrecomputedValues::zeroize()` used to wipe only `dp`/`dq`. `qinv`
+    /// (Q^-1 mod P) was left in the freed heap (issue #19). crypto-bigint
+    /// 0.7.5 implements `Zeroize` for `BoxedMontyForm` (value only).
+    #[test]
+    fn test_precomputed_zeroize_clears_qinv() {
+        let mut rng = ChaCha8Rng::from_seed([42; 32]);
+        let exp = BoxedUint::from(RsaPrivateKey::EXP);
+        let components = generate_multi_prime_key_with_exp(&mut rng, 2, 128, exp).unwrap();
+        let mut key = RsaPrivateKey::from_components(
+            components.n.get(),
+            components.e,
+            components.d,
+            components.primes,
+        )
+        .unwrap();
+
+        assert!(
+            bool::from(key.qinv().expect("precomputed").is_nonzero()),
+            "qinv must be non-zero before wipe"
+        );
+
+        key.precomputed.as_mut().unwrap().zeroize();
+
+        assert!(
+            bool::from(key.qinv().expect("precomputed still present").is_zero()),
+            "qinv must be wiped"
+        );
+        assert!(
+            bool::from(key.dp().expect("precomputed").is_zero()),
+            "dp must still be wiped"
+        );
+        assert!(
+            bool::from(key.dq().expect("precomputed").is_zero()),
+            "dq must still be wiped"
+        );
     }
 
     fn test_key_basics(private_key: &RsaPrivateKey) {

@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   allocates `2*(k-11)`, compacting with a public-length copy and
   `truncate(len)` so `len` (the public API) is unchanged and drop always frees
   the same allocation.
+- **`PrecomputedValues::zeroize()` now wipes `qinv` (Q⁻¹ mod P).** It previously
+  only cleared `dp`/`dq`, so the CRT coefficient remained in the heap after
+  drop (#19). `p_params` / `q_params` still cannot be wiped: `BoxedMontyParams`
+  has no `Zeroize` impl in crypto-bigint 0.7.5.
 
 ## [0.10.0] - 2026-08-25
 
