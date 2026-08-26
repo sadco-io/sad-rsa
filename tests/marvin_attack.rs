@@ -67,6 +67,66 @@ fn test_valid_ciphertext_decrypts_correctly() {
     }
 }
 
+/// `pkcs1v15_encrypt_unpad` used to finish with `output[start..].to_vec()`,
+/// which allocated exactly `output_length` bytes. Rust's allocator special-cases
+/// length 0 (no malloc, `memcpy(0)`, drop skips free), so empty valid messages
+/// (`valid_0`) were ~20 ns faster than every other Marvin class.
+///
+/// Returning `len == message.len()` is the public API; the allocation size is
+/// not. The returned `Vec` must keep a `k-11` (or larger, length-independent)
+/// allocation even when the message is empty, so construction and drop do not
+/// depend on plaintext length.
+#[test]
+fn test_decrypt_vec_capacity_independent_of_message_length() {
+    let mut rng = ChaCha8Rng::from_seed([42; 32]);
+    let priv_key = get_test_key();
+    let k = 64; // 512-bit key
+    let max_msg = k - 11;
+    let decrypting_key = DecryptingKey::new(priv_key);
+    let encrypting_key = decrypting_key.encrypting_key();
+
+    let mut capacities = Vec::new();
+    for msg_len in [0usize, 1, 8, 16, 32, max_msg] {
+        let mut message = vec![0u8; msg_len];
+        rng.fill_bytes(&mut message);
+
+        let ciphertext = RandomizedEncryptor::encrypt_with_rng(&encrypting_key, &mut rng, &message)
+            .expect("encryption should succeed");
+        let decrypted =
+            Decryptor::decrypt(&decrypting_key, &ciphertext).expect("decryption should succeed");
+
+        assert_eq!(message, decrypted, "round-trip for len={msg_len}");
+        assert!(
+            decrypted.capacity() >= max_msg,
+            "len={msg_len} cap={} must be >= k-11={max_msg} so drop always frees a fixed-size buffer",
+            decrypted.capacity()
+        );
+        capacities.push(decrypted.capacity());
+    }
+
+    let invalid = vec![0u8; k];
+    let synthetic = Decryptor::decrypt(&decrypting_key, &invalid)
+        .expect("invalid ciphertext returns synthetic");
+    assert!(
+        synthetic.capacity() >= max_msg,
+        "synthetic cap={} must be >= k-11={max_msg}",
+        synthetic.capacity()
+    );
+
+    let expected = capacities[0];
+    for (i, cap) in capacities.iter().enumerate() {
+        assert_eq!(
+            *cap, expected,
+            "capacity must not depend on message length (index {i})"
+        );
+    }
+    assert_eq!(
+        synthetic.capacity(),
+        expected,
+        "invalid path must use the same allocation size as the valid path"
+    );
+}
+
 #[test]
 fn test_invalid_ciphertext_returns_synthetic_message() {
     let priv_key = get_test_key();
