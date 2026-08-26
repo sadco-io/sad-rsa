@@ -209,9 +209,17 @@ pub(crate) fn pkcs1v15_encrypt_unpad(em: Vec<u8>, k: usize, kdk: &[u8; 32]) -> V
     let valid_choice = Choice::from_u8_lsb(valid);
     let output_length = usize::ct_select(&synthetic_length, &actual_length, valid_choice);
 
-    // SECURITY: Always allocate max_message_length to prevent allocator
-    // timing from leaking the actual message length.
-    let mut output = vec![0u8; max_message_length];
+    // SECURITY: Allocate 2*(k-11), not `output_length`. The extra half is
+    // zeros so a memcpy of exactly `max_message_length` bytes from `start`
+    // is in-bounds for every length, including 0. `truncate` then sets
+    // `len` (the public API) without shrinking capacity, so drop always
+    // frees the same allocation.
+    //
+    // Returning `output[start..].to_vec()` allocated exactly
+    // `output_length` bytes. Rust's empty Vec skips malloc/`memcpy`/free,
+    // which leaked empty vs non-empty plaintext (~20 ns on Marvin
+    // `valid_0`). `len` is unchanged; `capacity` is not part of the API.
+    let mut output = vec![0u8; max_message_length.saturating_mul(2)];
 
     // SECURITY: Always iterate over the full max_message_length to prevent
     // loop iteration count from leaking message length.
@@ -220,21 +228,25 @@ pub(crate) fn pkcs1v15_encrypt_unpad(em: Vec<u8>, k: usize, kdk: &[u8; 32]) -> V
     // position i in the output maps to position (k - max_message_length + i)
     // in both source buffers, ranging from index 11 to k-1 — always in-bounds.
     //
-    // The message bytes are right-aligned in the output buffer: the actual
-    // message occupies the last `actual_length` positions, and the synthetic
-    // message occupies the last `synthetic_length` positions. After the loop,
-    // we copy only the last `output_length` bytes to the result.
-    for (i, out_byte) in output.iter_mut().enumerate() {
+    // The mixed bytes are right-aligned in the first half of `output`.
+    // The actual message occupies the last `actual_length` positions, and
+    // the synthetic message occupies the last `synthetic_length` positions.
+    // Iterate the first half only -- `output` is 2 * max_message_length, and
+    // the upper half stays zero as copy_within headroom. Bounds are public
+    // constants, so the iteration count is still independent of the plaintext.
+    for (i, out_byte) in output[..max_message_length].iter_mut().enumerate() {
         let src_index = k - max_message_length + i;
         let act_byte = out[src_index];
         let syn_byte = synthetic_full[src_index];
         *out_byte = u8::ct_select(&syn_byte, &act_byte, valid_choice);
     }
 
-    // Extract the last output_length bytes (right-aligned message).
-    // This is the only variable-time operation, happening after all CT work.
+    // Compact the right-aligned message to index 0 with a public-length
+    // copy, then expose only `output_length` bytes via `len`.
     let start = max_message_length.saturating_sub(output_length);
-    output[start..].to_vec()
+    output.copy_within(start..start + max_message_length, 0);
+    output.truncate(output_length);
+    output
 }
 
 /// Removes the PKCS1v15 padding It returns one or zero in valid that indicates whether the

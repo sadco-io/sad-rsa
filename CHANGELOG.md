@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **PKCS#1 v1.5 decrypt no longer allocates the returned `Vec` to the exact
+  plaintext length.** After the constant-time mix into a `k-11` buffer, unpad
+  used to finish with `output[start..].to_vec()`. Rust's empty `Vec` skips
+  malloc/`memcpy`/free, so Marvin class `valid_0` (empty valid message) was
+  ~20 ns faster than every other class on a 1M RSA-2048 run (Friedman p=0.006;
+  worst pair two valid lengths, not valid-vs-invalid). Unpad now always
+  allocates `2*(k-11)`, compacting with a public-length copy and
+  `truncate(len)` so `len` (the public API) is unchanged and drop always frees
+  the same allocation.
+
 ## [0.10.0] - 2026-08-25
 
 ### Changed — version realignment
