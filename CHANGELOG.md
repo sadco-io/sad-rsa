@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **PKCS#1 v1.5 unpad no longer memmoves from a secret offset.** After the
+  constant-time mix, compact used `copy_within(start..)` with
+  `start = (k-11) - output_length`, so the source address leaked plaintext
+  length. Compact now scans the public `2*(k-11)` buffer with CMOV; `len` is
+  unchanged. A 1M RSA-2048 Marvin run on this change (unpinned, default
+  release, same harness as 0.10.1) gave Friedman p=0.527 (pass at 0.05);
+  worst pair `signature_padding_8` vs `valid_48`; mean-of-differences 95% CI
+  included 0; sign-test min p=0.019; `valid_0` was slowest, not fastest.
+  Mean decrypt rose ~100 µs (1.56 ms → 1.66 ms) from the public-index CMOV
+  scan. Mean spread stayed ~22 ns, the same noise floor as 0.10.1.
+
 ## [0.10.1] - 2026-08-26
 
 ### Security
