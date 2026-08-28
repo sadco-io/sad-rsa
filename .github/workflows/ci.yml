@@ -18,14 +18,15 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # The PR run already tested this exact tree -- strict status checks
+    # require the branch to be current with main before it can merge -- so the
+    # post-merge run re-verifies content that just passed. It still runs, for a
+    # smoke signal on main, but the matrix collapses to one representative leg.
+    # 1.85.0 is the MSRV; the full matrix runs on every pull_request.
     strategy:
       matrix:
-        rust:
-          - 1.85.0 # MSRV
-          - stable
-        target:
-          - thumbv7em-none-eabi
-          - wasm32-unknown-unknown
+        rust: ${{ (github.event_name == 'push' && fromJSON('["stable"]')) || fromJSON('["1.85.0","stable"]') }}
+        target: ${{ (github.event_name == 'push' && fromJSON('["thumbv7em-none-eabi"]')) || fromJSON('["thumbv7em-none-eabi","wasm32-unknown-unknown"]') }}
     steps:
       - uses: actions/checkout@v7
       - uses: RustCrypto/actions/cargo-cache@master
@@ -37,11 +38,14 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    # The PR run already tested this exact tree -- strict status checks
+    # require the branch to be current with main before it can merge -- so the
+    # post-merge run re-verifies content that just passed. It still runs, for a
+    # smoke signal on main, but the matrix collapses to one representative leg.
+    # 1.85.0 is the MSRV; the full matrix runs on every pull_request.
     strategy:
       matrix:
-        rust:
-          - 1.85.0 # MSRV
-          - stable
+        rust: ${{ (github.event_name == 'push' && fromJSON('["stable"]')) || fromJSON('["1.85.0","stable"]') }}
     steps:
       - uses: actions/checkout@v7
         with:
