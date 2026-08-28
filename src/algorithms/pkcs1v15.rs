@@ -241,12 +241,36 @@ pub(crate) fn pkcs1v15_encrypt_unpad(em: Vec<u8>, k: usize, kdk: &[u8; 32]) -> V
         *out_byte = u8::ct_select(&syn_byte, &act_byte, valid_choice);
     }
 
-    // Compact the right-aligned message to index 0 with a public-length
-    // copy, then expose only `output_length` bytes via `len`.
-    let start = max_message_length.saturating_sub(output_length);
-    output.copy_within(start..start + max_message_length, 0);
+    // Compact the right-aligned message to index 0, then expose only
+    // `output_length` bytes via `len`. Addresses and loop bounds are
+    // public; only CMOV masks depend on `output_length`.
+    ct_left_align(&mut output, max_message_length, output_length);
     output.truncate(output_length);
     output
+}
+
+/// Slide a right-aligned payload in `buf` (length `2 * max_message_length`)
+/// to index 0.
+///
+/// `copy_within(start..)` used a secret source offset (`start = max -
+/// output_length`), so the memmove address leaked plaintext length through
+/// the cache. Every load/store index here is public: we scan the whole
+/// buffer and CMOV the byte whose index equals `dest + start`.
+#[inline]
+fn ct_left_align(buf: &mut [u8], max_message_length: usize, output_length: usize) {
+    debug_assert_eq!(buf.len(), max_message_length.saturating_mul(2));
+    let start = max_message_length.saturating_sub(output_length);
+    let mut dest = vec![0u8; max_message_length.saturating_mul(2)];
+    for dest_i in 0..max_message_length {
+        let want = dest_i.saturating_add(start) as u32;
+        let mut acc = 0u8;
+        for (src_j, &byte) in buf.iter().enumerate() {
+            let eq = (src_j as u32).ct_eq(&want);
+            acc = u8::ct_select(&acc, &byte, eq);
+        }
+        dest[dest_i] = acc;
+    }
+    buf.copy_from_slice(&dest);
 }
 
 /// Removes the PKCS1v15 padding It returns one or zero in valid that indicates whether the
@@ -379,5 +403,32 @@ mod tests {
         let message = vec![1u8; 4];
         let res = pkcs1v15_encrypt_pad(&mut rng, &message, k);
         assert_eq!(res, Err(Error::MessageTooLong));
+    }
+
+    /// Right-aligned payload in a 2*max buffer must land at index 0 for every
+    /// length, including 0 and max. The compact must not use a secret source
+    /// offset (`copy_within(start..)`).
+    #[test]
+    fn test_ct_left_align_empty_mid_full() {
+        let max = 4usize;
+
+        // empty: start = max, source is the zeroed second half
+        let mut buf = vec![0u8; max * 2];
+        buf[..max].copy_from_slice(&[9, 8, 7, 6]);
+        ct_left_align(&mut buf, max, 0);
+        assert_eq!(&buf[..max], &[0, 0, 0, 0]);
+        assert_eq!(buf.len(), max * 2);
+
+        // mid: last 2 of the first half are the message
+        let mut buf = vec![0u8; max * 2];
+        buf[..max].copy_from_slice(&[1, 2, 3, 4]);
+        ct_left_align(&mut buf, max, 2);
+        assert_eq!(&buf[..max], &[3, 4, 0, 0]);
+
+        // full: start = 0, first half is the message
+        let mut buf = vec![0u8; max * 2];
+        buf[..max].copy_from_slice(&[5, 6, 7, 8]);
+        ct_left_align(&mut buf, max, max);
+        assert_eq!(&buf[..max], &[5, 6, 7, 8]);
     }
 }
