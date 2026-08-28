@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PKCS#1 v1.5 unpad no longer memmoves from a secret offset.** After the
   constant-time mix, compact used `copy_within(start..)` with
   `start = (k-11) - output_length`, so the source address leaked plaintext
-  length. Compact now scans the public `2*(k-11)` buffer and CMOVs; `len` is
+  length. Compact now scans the public `2*(k-11)` buffer with CMOV; `len` is
   unchanged. A 1M RSA-2048 Marvin run on this change (unpinned, default
   release, same harness as 0.10.1) gave Friedman p=0.527 (pass at 0.05);
   worst pair `signature_padding_8` vs `valid_48`; mean-of-differences 95% CI

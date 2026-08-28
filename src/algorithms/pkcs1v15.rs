@@ -261,14 +261,14 @@ fn ct_left_align(buf: &mut [u8], max_message_length: usize, output_length: usize
     debug_assert_eq!(buf.len(), max_message_length.saturating_mul(2));
     let start = max_message_length.saturating_sub(output_length);
     let mut dest = vec![0u8; max_message_length.saturating_mul(2)];
-    for dest_i in 0..max_message_length {
+    for (dest_i, dest_byte) in dest[..max_message_length].iter_mut().enumerate() {
         let want = dest_i.saturating_add(start) as u32;
         let mut acc = 0u8;
         for (src_j, &byte) in buf.iter().enumerate() {
             let eq = (src_j as u32).ct_eq(&want);
             acc = u8::ct_select(&acc, &byte, eq);
         }
-        dest[dest_i] = acc;
+        *dest_byte = acc;
     }
     buf.copy_from_slice(&dest);
 }
