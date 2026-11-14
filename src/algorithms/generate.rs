@@ -84,7 +84,7 @@ pub(crate) fn generate_multi_prime_key_with_exp<R: CryptoRng + ?Sized>(
         for (i, prime) in primes.iter_mut().enumerate() {
             let bits = (todo / (nprimes - i)) as u32;
             *prime = generate_prime_with_rng(rng, bits);
-            todo -= prime.bits() as usize;
+            todo -= prime.bit_width() as usize;
         }
 
         // Makes sure that primes is pairwise unequal.
@@ -98,7 +98,7 @@ pub(crate) fn generate_multi_prime_key_with_exp<R: CryptoRng + ?Sized>(
 
         let n = compute_modulus(&primes);
 
-        if n.bits() as usize != bit_size {
+        if n.bit_width() as usize != bit_size {
             // This should never happen for nprimes == 2 because
             // generate_prime_with_rng should set the top two bits in each prime.
             // For nprimes > 2 we hope it does not happen often.
@@ -127,7 +127,7 @@ fn generate_prime_with_rng<R: CryptoRng + ?Sized>(rng: &mut R, bit_length: u32) 
     sieve_and_find(rng, factory, |_rng, candidate| {
         is_prime(Flavor::Any, candidate)
     })
-    .unwrap_or_else(|err| panic!("Error generating random candidates: {}", err))
+    .unwrap_or_else(|err| panic!("Error generating random candidates: {err}"))
     .expect("will produce a result eventually")
 }
 
@@ -162,7 +162,7 @@ mod tests {
                     let components =
                         generate_multi_prime_key_with_exp(&mut rng, $multi, $size, exp.clone())
                             .unwrap();
-                    assert_eq!(components.n.bits(), $size);
+                    assert_eq!(components.n.bit_width(), $size);
                     assert_eq!(components.primes.len(), $multi);
                 }
             }

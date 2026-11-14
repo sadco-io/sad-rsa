@@ -92,9 +92,9 @@ pre-releases. The changes you will hit:
 | RNG traits | `rand_core` 0.6 (`rand` 0.8, `rand::thread_rng()`) | `rand_core` 0.10 (`rand` 0.10, `rand::rng()`) |
 | Digest traits | `digest`/`sha2` 0.10 | `digest`/`sha2` 0.11 |
 | Signature traits | `signature` 2.x | `signature` 3.0 |
-| Key encoding | `pkcs1` 0.7, `pkcs8` 0.10 | `pkcs1` 0.8.0-rc, `pkcs8` 0.11 (same trait names) |
+| Key encoding | `pkcs1` 0.7, `pkcs8` 0.10 | `pkcs1` 0.8, `pkcs8` 0.11 (same trait names) |
 | Feature flags | `pem` feature | no `pem` feature — PEM is always on via the default `encoding` feature |
-| MSRV | 1.65 | 1.85 |
+| MSRV | 1.65 | 1.89 |
 
 Concretely, in `Cargo.toml`:
 
@@ -150,7 +150,7 @@ exhaustive matches need updating).
 
 ## Minimum Supported Rust Version (MSRV)
 
-This crate supports Rust 1.85 or higher.
+This crate supports Rust 1.89 or higher.
 
 ## Attribution
 
@@ -182,7 +182,7 @@ dual licensed as above, without any additional terms or conditions.
 [build-image]: https://github.com/sadco-io/sad-rsa/actions/workflows/ci.yml/badge.svg
 [build-link]: https://github.com/sadco-io/sad-rsa/actions/workflows/ci.yml
 [license-image]: https://img.shields.io/badge/license-Apache2.0/MIT-blue.svg
-[msrv-image]: https://img.shields.io/badge/rustc-1.85+-blue.svg
+[msrv-image]: https://img.shields.io/badge/rustc-1.89+-blue.svg
 
 [//]: # (links)
 

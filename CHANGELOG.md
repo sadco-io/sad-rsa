@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-11-13
+
+### Security
+
+- Upgraded `crypto-bigint` `0.7.5` -> `0.7.11` and `ctutils` `0.4.2` -> `0.4.8`
+  (minimum requirement bumped to `crypto-bigint = "0.7.11"`). Intermediate releases
+  `0.7.4`–`0.7.8` were **yanked** upstream. Fixes **RUSTSEC-2026-0387** (secret-dependent
+  branching / timing variability in `borrowing_sub`, CTZ, `div_rem`, `nlimbs`, Montgomery
+  multiplication, `UintRef::PartialEq`, and `BoxedMontyForm::invert`), **RUSTSEC-2026-0385**
+  (non-constant-time `const fn` mask generation in `ctutils::Choice` and branching `u128`
+  comparisons on 32-bit targets), and Thumb-1 constant-time issues
+  (RustCrypto/crypto-bigint#1391, #1399).
+- Upgraded `der` `0.8.1` -> `0.8.3`, fixing BER indefinite-length nesting stack overflows
+  and panics on malformed/truncated binary `REAL` values.
+
+### Changed
+
+- Upgraded `pkcs1` `0.8.0-rc.4` -> `0.8.0` stable, eliminating the last pre-release (`-rc`)
+  dependency from the dependency tree (#18, #61). `TryFrom<pkcs1::RsaPrivateKey<U>>` and
+  `TryFrom<pkcs1::RsaPublicKey<U>>` are now generic over `der::asn1::AsUintRef`, supporting
+  both borrowed (`*Ref`) and owned (`*Owned`) PKCS#1 key types, with checked bit-length
+  multiplication on untrusted DER inputs.
+- Upgraded `spki` `0.8.0` -> `0.8.1`.
+- Raised Minimum Supported Rust Version (MSRV) from `1.85` to `1.89` (required by
+  `aes 0.9.4` via `pkcs5`, `sha2 0.11.1`, `proptest 1.12.0`, and
+  `crypto-bigint 0.7.11` / `ctutils 0.4.8`).
+- Migrated deprecated `BoxedUint::bits` / `bits_vartime` call sites to
+  `bit_width` / `bit_width_vartime`; incorporates `crypto-bigint 0.7.11` `BoxedMontyForm`
+  squaring optimizations for RSA CRT decryption (#1397, #1398).
+- Refreshed dependencies: `sha2` `0.11.0` -> `0.11.1`, `zeroize` `1.9.0` -> `1.9.1`,
+  `const-oid` `0.10.2` -> `0.10.3`, `aes` `0.9.2` -> `0.9.4`, `cpufeatures` `0.3.0` -> `0.3.1`,
+  `hybrid-array` `0.4.14` -> `0.4.15`, `inout` `0.2.2` -> `0.2.6`, plus dev/CI bumps
+  (`rand` `0.10.2` -> `0.10.3`, `rstest` `0.26.1` -> `0.28.0`, `proptest` `1.11.0` -> `1.12.0`,
+  `serde_json` `1.0.151` -> `1.0.154`, `crate-ci/typos` `v1.48.0` -> `v1.51.1`).
+
 ## [0.10.2] - 2026-08-28
 
 ### Security

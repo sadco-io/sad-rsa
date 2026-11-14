@@ -51,7 +51,7 @@ impl From<Signature> for Box<[u8]> {
 impl LowerHex for Signature {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         for byte in self.to_bytes().iter() {
-            write!(f, "{:02x}", byte)?;
+            write!(f, "{byte:02x}")?;
         }
         Ok(())
     }
@@ -60,7 +60,7 @@ impl LowerHex for Signature {
 impl UpperHex for Signature {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         for byte in self.to_bytes().iter() {
-            write!(f, "{:02X}", byte)?;
+            write!(f, "{byte:02X}")?;
         }
         Ok(())
     }
@@ -68,7 +68,7 @@ impl UpperHex for Signature {
 
 impl Display for Signature {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{:X}", self)
+        write!(f, "{self:X}")
     }
 }
 

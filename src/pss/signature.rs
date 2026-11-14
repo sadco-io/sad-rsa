@@ -62,7 +62,7 @@ impl UpperHex for Signature {
 
 impl Display for Signature {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{:X}", self)
+        write!(f, "{self:X}")
     }
 }
 

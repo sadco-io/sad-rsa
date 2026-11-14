@@ -22,7 +22,7 @@ jobs:
       - uses: RustCrypto/actions/cargo-cache@master
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.85.0
+          toolchain: 1.89.0
           components: clippy
       - run: cargo clippy --all -- -D warnings
 
@@ -51,4 +51,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: crate-ci/typos@v1.48.0
+      - uses: crate-ci/typos@v1.51.1
