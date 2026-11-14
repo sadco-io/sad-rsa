@@ -28,20 +28,20 @@ fn uint_from_slice(data: &[u8], bits: u32) -> pkcs1::Result<BoxedUint> {
 
 impl pkcs1::DecodeRsaPrivateKey for RsaPrivateKey {
     fn from_pkcs1_der(bytes: &[u8]) -> pkcs1::Result<Self> {
-        pkcs1::RsaPrivateKey::from_der(bytes)?.try_into()
+        pkcs1::RsaPrivateKeyRef::from_der(bytes)?.try_into()
     }
 }
 
 impl pkcs1::DecodeRsaPublicKey for RsaPublicKey {
     fn from_pkcs1_der(bytes: &[u8]) -> pkcs1::Result<Self> {
-        pkcs1::RsaPublicKey::from_der(bytes)?.try_into()
+        pkcs1::RsaPublicKeyRef::from_der(bytes)?.try_into()
     }
 }
 
-impl TryFrom<pkcs1::RsaPrivateKey<'_>> for RsaPrivateKey {
+impl TryFrom<pkcs1::RsaPrivateKeyRef<'_>> for RsaPrivateKey {
     type Error = pkcs1::Error;
 
-    fn try_from(pkcs1_key: pkcs1::RsaPrivateKey<'_>) -> pkcs1::Result<RsaPrivateKey> {
+    fn try_from(pkcs1_key: pkcs1::RsaPrivateKeyRef<'_>) -> pkcs1::Result<RsaPrivateKey> {
         use pkcs1::Error::KeyMalformed;
 
         // Multi-prime RSA keys not currently supported
@@ -67,10 +67,10 @@ impl TryFrom<pkcs1::RsaPrivateKey<'_>> for RsaPrivateKey {
     }
 }
 
-impl TryFrom<pkcs1::RsaPublicKey<'_>> for RsaPublicKey {
+impl TryFrom<pkcs1::RsaPublicKeyRef<'_>> for RsaPublicKey {
     type Error = pkcs1::Error;
 
-    fn try_from(pkcs1_key: pkcs1::RsaPublicKey<'_>) -> pkcs1::Result<Self> {
+    fn try_from(pkcs1_key: pkcs1::RsaPublicKeyRef<'_>) -> pkcs1::Result<Self> {
         use pkcs1::Error::KeyMalformed;
 
         let bits = u32::try_from(pkcs1_key.modulus.as_bytes().len()).map_err(|_| KeyMalformed)? * 8;
@@ -121,7 +121,7 @@ impl pkcs1::EncodeRsaPrivateKey for RsaPrivateKey {
                 .to_be_bytes(),
         );
 
-        Ok(SecretDocument::encode_msg(&pkcs1::RsaPrivateKey {
+        Ok(SecretDocument::encode_msg(&pkcs1::RsaPrivateKeyRef {
             modulus: pkcs1::UintRef::new(&modulus)?,
             public_exponent: pkcs1::UintRef::new(&public_exponent)?,
             private_exponent: pkcs1::UintRef::new(&private_exponent)?,
@@ -140,7 +140,7 @@ impl pkcs1::EncodeRsaPublicKey for RsaPublicKey {
         let modulus = self.n().to_be_bytes();
         let public_exponent = self.e().to_be_bytes();
 
-        Ok(Document::encode_msg(&pkcs1::RsaPublicKey {
+        Ok(Document::encode_msg(&pkcs1::RsaPublicKeyRef {
             modulus: pkcs1::UintRef::new(&modulus)?,
             public_exponent: pkcs1::UintRef::new(&public_exponent)?,
         })?)
@@ -174,7 +174,7 @@ impl TryFrom<pkcs8::PrivateKeyInfoRef<'_>> for RsaPrivateKey {
     fn try_from(private_key_info: pkcs8::PrivateKeyInfoRef<'_>) -> pkcs8::Result<Self> {
         verify_algorithm_id(&private_key_info.algorithm)?;
 
-        pkcs1::RsaPrivateKey::try_from(private_key_info.private_key)
+        pkcs1::RsaPrivateKeyRef::try_from(private_key_info.private_key)
             .and_then(TryInto::try_into)
             .map_err(pkcs1_error_to_pkcs8)
     }
@@ -188,7 +188,7 @@ impl TryFrom<pkcs8::SubjectPublicKeyInfoRef<'_>> for RsaPublicKey {
 
         verify_algorithm_id(&spki.algorithm)?;
 
-        pkcs1::RsaPublicKey::try_from(spki.subject_public_key.as_bytes().ok_or(KeyMalformed)?)
+        pkcs1::RsaPublicKeyRef::try_from(spki.subject_public_key.as_bytes().ok_or(KeyMalformed)?)
             .and_then(TryInto::try_into)
             .map_err(pkcs1_error_to_spki)
     }

@@ -48,6 +48,23 @@ const RSA_2048_PUB_PEM: &str = include_str!("examples/pkcs1/rsa2048-pub.pem");
 const RSA_4096_PUB_PEM: &str = include_str!("examples/pkcs1/rsa4096-pub.pem");
 
 #[test]
+fn convert_borrowed_pkcs1_keys() {
+    // The rc.5 borrowed aliases must retain both conversion impls and DER output.
+    use sad_rsa::pkcs1::{der::Decode, RsaPrivateKeyRef, RsaPublicKeyRef};
+
+    let private =
+        RsaPrivateKey::try_from(RsaPrivateKeyRef::from_der(RSA_2048_PRIV_DER).unwrap()).unwrap();
+    assert_eq!(
+        private.to_pkcs1_der().unwrap().as_bytes(),
+        RSA_2048_PRIV_DER
+    );
+
+    let public =
+        RsaPublicKey::try_from(RsaPublicKeyRef::from_der(RSA_2048_PUB_DER).unwrap()).unwrap();
+    assert_eq!(public.to_pkcs1_der().unwrap().as_bytes(), RSA_2048_PUB_DER);
+}
+
+#[test]
 fn decode_rsa2048_priv_der() {
     let key = RsaPrivateKey::from_pkcs1_der(RSA_2048_PRIV_DER).unwrap();
 
