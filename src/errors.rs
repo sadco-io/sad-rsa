@@ -102,14 +102,14 @@ impl core::fmt::Display for Error {
             Error::PublicExponentTooSmall => write!(f, "public exponent too small"),
             Error::PublicExponentTooLarge => write!(f, "public exponent too large"),
             #[cfg(feature = "encoding")]
-            Error::Pkcs1(err) => write!(f, "{}", err),
+            Error::Pkcs1(err) => write!(f, "{err}"),
             #[cfg(feature = "encoding")]
-            Error::Pkcs8(err) => write!(f, "{}", err),
+            Error::Pkcs8(err) => write!(f, "{err}"),
             Error::Internal => write!(f, "internal error"),
             Error::LabelTooLong => write!(f, "label too long"),
             Error::InvalidPadLen => write!(f, "invalid padding length"),
             Error::InvalidArguments => write!(f, "invalid arguments"),
-            Error::Decode(err) => write!(f, "{:?}", err),
+            Error::Decode(err) => write!(f, "{err:?}"),
             Error::Rng => write!(f, "rng error"),
         }
     }

@@ -22,10 +22,10 @@ jobs:
     # require the branch to be current with main before it can merge -- so the
     # post-merge run re-verifies content that just passed. It still runs, for a
     # smoke signal on main, but the matrix collapses to one representative leg.
-    # 1.85.0 is the MSRV; the full matrix runs on every pull_request.
+    # 1.89.0 is the MSRV; the full matrix runs on every pull_request.
     strategy:
       matrix:
-        rust: ${{ (github.event_name == 'push' && fromJSON('["stable"]')) || fromJSON('["1.85.0","stable"]') }}
+        rust: ${{ (github.event_name == 'push' && fromJSON('["stable"]')) || fromJSON('["1.89.0","stable"]') }}
         target: ${{ (github.event_name == 'push' && fromJSON('["thumbv7em-none-eabi"]')) || fromJSON('["thumbv7em-none-eabi","wasm32-unknown-unknown"]') }}
     steps:
       - uses: actions/checkout@v7
@@ -42,10 +42,10 @@ jobs:
     # require the branch to be current with main before it can merge -- so the
     # post-merge run re-verifies content that just passed. It still runs, for a
     # smoke signal on main, but the matrix collapses to one representative leg.
-    # 1.85.0 is the MSRV; the full matrix runs on every pull_request.
+    # 1.89.0 is the MSRV; the full matrix runs on every pull_request.
     strategy:
       matrix:
-        rust: ${{ (github.event_name == 'push' && fromJSON('["stable"]')) || fromJSON('["1.85.0","stable"]') }}
+        rust: ${{ (github.event_name == 'push' && fromJSON('["stable"]')) || fromJSON('["1.89.0","stable"]') }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -81,7 +81,7 @@ jobs:
       - uses: RustCrypto/actions/cargo-cache@master
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2025-02-22
+          toolchain: nightly-2026-11-01
       - run: cargo build --benches
 
   deny:

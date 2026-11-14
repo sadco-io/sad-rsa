@@ -159,7 +159,13 @@ where
     let raw = rsa_encrypt(pub_key, sig)?;
     let mut em = uint_to_be_pad(raw, pub_key.size())?;
 
-    emsa_pss_verify(hashed, &mut em, salt_len, digest, pub_key.n().bits() as _)
+    emsa_pss_verify(
+        hashed,
+        &mut em,
+        salt_len,
+        digest,
+        pub_key.n().bit_width() as _,
+    )
 }
 
 pub(crate) fn verify_digest<D>(
@@ -178,7 +184,7 @@ where
 
     let mut em = uint_to_be_pad(rsa_encrypt(pub_key, sig)?, pub_key.size())?;
 
-    emsa_pss_verify_digest::<D>(hashed, &mut em, salt_len, pub_key.n().bits() as _)
+    emsa_pss_verify_digest::<D>(hashed, &mut em, salt_len, pub_key.n().bit_width() as _)
 }
 
 /// SignPSS calculates the signature of hashed using RSASSA-PSS.
@@ -237,7 +243,7 @@ where
     T: TryCryptoRng + ?Sized,
     D: Digest + FixedOutputReset,
 {
-    let em_bits = priv_key.n().bits() - 1;
+    let em_bits = priv_key.n().bit_width() - 1;
 
     let em = emsa_pss_encode(hashed, em_bits as _, salt, digest)?;
 
@@ -257,7 +263,7 @@ where
     T: TryCryptoRng + ?Sized,
     D: Digest + FixedOutputReset,
 {
-    let em_bits = priv_key.n().bits() - 1;
+    let em_bits = priv_key.n().bit_width() - 1;
     let em = emsa_pss_encode_digest::<D>(hashed, em_bits as _, salt)?;
 
     let em = BoxedUint::from_be_slice(&em, priv_key.n_bits_precision())?;

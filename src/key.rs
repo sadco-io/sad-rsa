@@ -366,7 +366,7 @@ impl RsaPrivateKey {
 
         // The modulus may come in padded with zeros, shorten it
         // to ensure optimal performance of arithmetic operations.
-        let n_bits = n.bits_vartime();
+        let n_bits = n.bit_width_vartime();
         let n = n.resize_unchecked(n_bits);
 
         let n_params = BoxedMontyParams::new(n.clone());
@@ -401,7 +401,7 @@ impl RsaPrivateKey {
         let primes = primes
             .into_iter()
             .map(|p| {
-                let p_bits = p.bits();
+                let p_bits = p.bit_width();
                 p.resize_unchecked(p_bits)
             })
             .collect();
@@ -689,7 +689,7 @@ pub fn check_public(public_key: &impl PublicKeyParts) -> Result<()> {
 #[inline]
 fn check_public_with_max_size(n: &BoxedUint, e: &BoxedUint, max_size: Option<usize>) -> Result<()> {
     if let Some(max_size) = max_size {
-        if n.bits_vartime() as usize > max_size {
+        if n.bit_width_vartime() as usize > max_size {
             return Err(Error::ModulusTooLarge);
         }
     }
@@ -869,7 +869,7 @@ mod tests {
                         components.primes,
                     )
                     .unwrap();
-                    assert_eq!(PublicKeyParts::n(&private_key).bits(), $size);
+                    assert_eq!(PublicKeyParts::n(&private_key).bit_width(), $size);
 
                     test_key_basics(&private_key);
                 }
