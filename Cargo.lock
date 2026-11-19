@@ -742,7 +742,7 @@ dependencies = [
 
 [[package]]
 name = "sad-rsa"
-version = "0.10.3"
+version = "0.10.4"
 dependencies = [
  "base64ct",
  "const-oid",

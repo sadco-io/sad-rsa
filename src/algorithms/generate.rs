@@ -96,7 +96,7 @@ pub(crate) fn generate_multi_prime_key_with_exp<R: CryptoRng + ?Sized>(
             }
         }
 
-        let n = compute_modulus(&primes);
+        let n = compute_modulus(&primes)?;
 
         if n.bit_width() as usize != bit_size {
             // This should never happen for nprimes == 2 because

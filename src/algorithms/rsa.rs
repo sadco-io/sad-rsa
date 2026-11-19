@@ -4,7 +4,8 @@ use core::cmp::Ordering;
 
 use crypto_bigint::modular::{BoxedMontyForm, BoxedMontyParams};
 use crypto_bigint::{
-    BoxedUint, ConcatenatingMul, ConcatenatingSquare, Gcd, NonZero, Odd, RandomMod, Resize,
+    BoxedUint, CheckedAdd, CheckedSub, ConcatenatingMul, ConcatenatingSquare, Gcd, NonZero, Odd,
+    RandomMod, Resize,
 };
 use rand_core::TryCryptoRng;
 use zeroize::Zeroize;
@@ -74,7 +75,6 @@ pub fn rsa_decrypt<R: TryCryptoRng + ?Sized>(
         (Some(dp), Some(dq), Some(qinv), Some(p_params), Some(q_params)) if !is_multiprime => {
             // We have the precalculated values needed for the CRT.
 
-            let p = &priv_key.primes()[0];
             let q = &priv_key.primes()[1];
 
             // precomputed: dP = (1/e) mod (p-1) = d mod (p-1)
@@ -100,8 +100,9 @@ pub fn rsa_decrypt<R: TryCryptoRng + ?Sized>(
             // (m1 - m2) mod p = (m1 mod p) - (m2 mod p) mod p
             let m2_mod_p = match p_params.bits_precision().cmp(&q_params.bits_precision()) {
                 Ordering::Less => {
-                    let p_wide = NonZero::new(p.clone())
-                        .expect("`p` is non-zero")
+                    let p_wide = p_params
+                        .modulus()
+                        .as_nz_ref()
                         .resize_unchecked(q_params.bits_precision());
                     (&m2 % p_wide).resize_unchecked(p_params.bits_precision())
                 }
@@ -255,35 +256,65 @@ pub fn recover_primes(
 
     // Note: because e is at most u64::MAX, it is already
     // known to be < 2**256
-    if e <= &BoxedUint::from(2u64.pow(16)) {
+    if e <= &BoxedUint::from(2u64.pow(16)) || bool::from(d.is_zero()) {
         return Err(Error::InvalidArguments);
     }
 
     // 1. Let a = (de – 1) × GCD(n – 1, de – 1).
-    let bits = d.bits_precision() * 2;
+    let operand_bits = d
+        .bits_precision()
+        .max(e.bits_precision())
+        .max(n.bits_precision());
+    let bits = operand_bits.checked_mul(2).ok_or(Error::InvalidArguments)?;
     let one = BoxedUint::one_with_precision(bits);
-    let e = e.resize_unchecked(d.bits_precision());
-    let d = d.resize_unchecked(d.bits_precision());
+    let e = e.resize_unchecked(operand_bits);
+    let d = d.resize_unchecked(operand_bits);
     let n = n.resize_unchecked(bits);
 
-    let a1 = d.concatenating_mul(e) - &one;
-    let a2 = (n.as_ref() - &one).gcd(&a1);
+    let a1 = d
+        .concatenating_mul(e)
+        .checked_sub(&one)
+        .into_option()
+        .ok_or(Error::InvalidArguments)?;
+    let n_minus_1 = n
+        .as_ref()
+        .checked_sub(&one)
+        .into_option()
+        .ok_or(Error::InvalidArguments)?;
+    let a2 = n_minus_1.gcd(&a1);
     let a = a1.concatenating_mul(a2);
     let n = n.resize_unchecked(a.bits_precision());
 
     // 2. Let m = floor(a /n) and r = a – m n, so that a = m n + r and 0 ≤ r < n.
     let a_prec = a.bits_precision();
     let m = &a / &n;
-    let r = a - m.concatenating_mul(n.as_ref()).resize_unchecked(a_prec);
+    let mn = m.concatenating_mul(n.as_ref()).resize_unchecked(a_prec);
+    let r = a
+        .checked_sub(&mn)
+        .into_option()
+        .ok_or(Error::InvalidArguments)?;
     let n = n.get();
 
     // 3. Let b = ( (n – r)/(m + 1) ) + 1; if b is not an integer or b^2 ≤ 4n, then output an error indicator,
     //    and exit without further processing.
-    let modulus_check = (&n - &r) % NonZero::new(&m + &one).expect("adding 1");
+    let one_a = BoxedUint::one_with_precision(a_prec);
+    let n_minus_r = n
+        .checked_sub(&r)
+        .into_option()
+        .ok_or(Error::InvalidArguments)?;
+    let m_plus_1 = m
+        .checked_add(&one_a)
+        .into_option()
+        .and_then(|v| NonZero::new(v).into_option())
+        .ok_or(Error::InvalidArguments)?;
+    let modulus_check = &n_minus_r % &m_plus_1;
     if (!modulus_check.is_zero()).into() {
         return Err(Error::InvalidArguments);
     }
-    let b = ((&n - &r) / NonZero::new(&m + &one).expect("adding one")) + one;
+    let b = (&n_minus_r / &m_plus_1)
+        .checked_add(&one_a)
+        .into_option()
+        .ok_or(Error::InvalidArguments)?;
 
     let four = BoxedUint::from(4u32);
     let b_squared = b.concatenating_square();
@@ -294,7 +325,10 @@ pub fn recover_primes(
     if b_squared <= four_n {
         return Err(Error::InvalidArguments);
     }
-    let b_squared_minus_four_n = b_squared - four_n;
+    let b_squared_minus_four_n = b_squared
+        .checked_sub(&four_n)
+        .into_option()
+        .ok_or(Error::InvalidArguments)?;
 
     // 4. Let ϒ be the positive square root of b^2 – 4n; if ϒ is not an integer,
     //    then output an error indicator, and exit without further processing.
@@ -307,23 +341,34 @@ pub fn recover_primes(
     }
 
     let bits = core::cmp::max(b.bits_precision(), y.bits_precision());
+    let b_wide = b.resize_unchecked(bits);
+    let y_wide = y.resize_unchecked(bits);
     let two = NonZero::new(BoxedUint::from(2u64))
-        .expect("2 is non zero")
+        .into_option()
+        .ok_or(Error::Internal)?
         .resize_unchecked(bits);
-    let p = (&b + &y) / &two;
-    let q = (b - y) / two;
+    let b_plus_y = b_wide
+        .checked_add(&y_wide)
+        .into_option()
+        .ok_or(Error::InvalidArguments)?;
+    let b_minus_y = b_wide
+        .checked_sub(&y_wide)
+        .into_option()
+        .ok_or(Error::InvalidArguments)?;
+    let p = b_plus_y / &two;
+    let q = b_minus_y / two;
 
     Ok((p, q))
 }
 
 /// Compute the modulus of a key from its primes.
-pub(crate) fn compute_modulus(primes: &[BoxedUint]) -> Odd<BoxedUint> {
+pub(crate) fn compute_modulus(primes: &[BoxedUint]) -> Result<Odd<BoxedUint>> {
     let mut primes = primes.iter();
-    let mut out = primes.next().expect("must at least be one prime").clone();
+    let mut out = primes.next().ok_or(Error::NprimesTooSmall)?.clone();
     for p in primes {
         out = out.concatenating_mul(p);
     }
-    Odd::new(out).expect("modulus must be odd")
+    Odd::new(out).into_option().ok_or(Error::InvalidPrime)
 }
 
 /// Compute the private exponent from its primes (p and q) and public exponent
@@ -340,13 +385,20 @@ pub(crate) fn compute_private_exponent_euler_totient(
     let mut totient = BoxedUint::one_with_precision(bits);
 
     for prime in primes {
-        totient = totient.concatenating_mul(prime - &BoxedUint::one());
+        let one = BoxedUint::one_with_precision(prime.bits_precision());
+        let p_minus_1 = prime
+            .checked_sub(&one)
+            .into_option()
+            .ok_or(Error::InvalidPrime)?;
+        totient = totient.concatenating_mul(p_minus_1);
     }
     let exp = exp.resize_unchecked(totient.bits_precision());
 
     // NOTE: `mod_inverse` checks if `exp` evenly divides `totient` and returns `None` if so.
     // This ensures that `exp` is not a factor of any `(prime - 1)`.
-    let totient = NonZero::new(totient).expect("known");
+    let totient = NonZero::new(totient)
+        .into_option()
+        .ok_or(Error::InvalidPrime)?;
     match exp.invert_mod(&totient).into_option() {
         Some(res) => Ok(res),
         None => Err(Error::InvalidPrime),
@@ -367,15 +419,26 @@ pub(crate) fn compute_private_exponent_carmicheal(
     q: &BoxedUint,
     exp: &BoxedUint,
 ) -> Result<BoxedUint> {
-    let one = BoxedUint::one();
-    let p1 = p - &one;
-    let q1 = q - &one;
+    let p_one = BoxedUint::one_with_precision(p.bits_precision());
+    let q_one = BoxedUint::one_with_precision(q.bits_precision());
+    let p1 = p
+        .checked_sub(&p_one)
+        .into_option()
+        .ok_or(Error::InvalidPrime)?;
+    let q1 = q
+        .checked_sub(&q_one)
+        .into_option()
+        .ok_or(Error::InvalidPrime)?;
 
     // LCM inlined
-    let gcd = p1.gcd(&q1);
-    let lcm = (p1 / NonZero::new(gcd).expect("gcd is non zero")).concatenating_mul(&q1);
+    let gcd = NonZero::new(p1.gcd(&q1))
+        .into_option()
+        .ok_or(Error::InvalidPrime)?;
+    let lcm = NonZero::new((p1 / gcd).concatenating_mul(&q1))
+        .into_option()
+        .ok_or(Error::InvalidPrime)?;
     let exp = exp.resize_unchecked(lcm.bits_precision());
-    if let Some(d) = exp.invert_mod(&NonZero::new(lcm).expect("non zero")).into() {
+    if let Some(d) = exp.invert_mod(&lcm).into() {
         Ok(d)
     } else {
         // `exp` evenly divides `lcm`

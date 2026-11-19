@@ -1,3 +1,7 @@
+[default]
+# GitHub Security Advisory IDs (e.g. GHSA-xxxx-xxxx-xxxx) are random identifiers.
+extend-ignore-re = ["GHSA(-[23456789cfghjmpqrvwx]{4}){3}"]
+
 [default.extend-identifiers]
 # typ stands for type, but it's a reserved identifier
 typ = "typ"
