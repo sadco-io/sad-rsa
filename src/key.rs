@@ -4,7 +4,9 @@ use core::fmt;
 use core::hash::{Hash, Hasher};
 
 use crypto_bigint::modular::{BoxedMontyForm, BoxedMontyParams};
-use crypto_bigint::{BoxedUint, ConcatenatingMul, Integer, NonZero, Odd, Resize};
+use crypto_bigint::{
+    BoxedUint, Choice, ConcatenatingMul, CtEq, CtLt, Integer, NonZero, Odd, Resize,
+};
 use rand_core::CryptoRng;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 #[cfg(feature = "serde")]
@@ -239,7 +241,7 @@ impl RsaPublicKey {
             .into_option()
             .ok_or(Error::InvalidModulus)?;
         let n_params = BoxedMontyParams::new(n_odd);
-        let n = NonZero::new(n).expect("checked above");
+        let n = NonZero::new(n).into_option().ok_or(Error::InvalidModulus)?;
 
         Ok(Self { n, e, n_params })
     }
@@ -402,9 +404,12 @@ impl RsaPrivateKey {
             .into_iter()
             .map(|p| {
                 let p_bits = p.bit_width();
-                p.resize_unchecked(p_bits)
+                if p_bits == 0 {
+                    return Err(Error::InvalidPrime);
+                }
+                Ok(p.resize_unchecked(p_bits))
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
 
         let mut k = RsaPrivateKey {
             pubkey_components: RsaPublicKey {
@@ -437,13 +442,14 @@ impl RsaPrivateKey {
         q: BoxedUint,
         public_exponent: BoxedUint,
     ) -> Result<RsaPrivateKey> {
-        if p == q {
+        let two = BoxedUint::from(2u64);
+        if (p.ct_eq(&q) | p.ct_lt(&two) | q.ct_lt(&two) | !p.is_odd() | !q.is_odd()).to_bool() {
             return Err(Error::InvalidPrime);
         }
 
         let d = compute_private_exponent_carmicheal(&p, &q, &public_exponent)?;
         let primes = vec![p, q];
-        let n = compute_modulus(&primes);
+        let n = compute_modulus(&primes)?;
 
         Self::from_components(n.get(), public_exponent, d, primes)
     }
@@ -459,16 +465,20 @@ impl RsaPrivateKey {
             return Err(Error::NprimesTooSmall);
         }
 
-        // Makes sure that the primes are pairwise unequal.
+        // Factors must be odd, >= 2, and pairwise distinct before deriving n or d.
+        let two = BoxedUint::from(2u64);
+        let mut invalid_primes = Choice::FALSE;
         for (i, prime1) in primes.iter().enumerate() {
-            for prime2 in primes.iter().take(i) {
-                if prime1 == prime2 {
-                    return Err(Error::InvalidPrime);
-                }
+            invalid_primes |= prime1.ct_lt(&two) | !prime1.is_odd();
+            for prime2 in &primes[..i] {
+                invalid_primes |= prime1.ct_eq(prime2);
             }
         }
+        if invalid_primes.to_bool() {
+            return Err(Error::InvalidPrime);
+        }
 
-        let n = compute_modulus(&primes);
+        let n = compute_modulus(&primes)?;
         let d = compute_private_exponent_euler_totient(&primes, &public_exponent)?;
 
         Self::from_components(n.get(), public_exponent, d, primes)
@@ -496,8 +506,11 @@ impl RsaPrivateKey {
         }
 
         let d = &self.d;
-        let p = self.primes[0].clone();
-        let q = self.primes[1].clone();
+        let [p, q, ..] = self.primes.as_slice() else {
+            return Err(Error::NprimesTooSmall);
+        };
+        let p = p.clone();
+        let q = q.clone();
 
         let p_odd = Odd::new(p.clone())
             .into_option()
@@ -511,26 +524,21 @@ impl RsaPrivateKey {
         let x = NonZero::new(p.wrapping_sub(BoxedUint::one()))
             .into_option()
             .ok_or(Error::InvalidPrime)?;
-        let dp = d.rem_vartime(&x);
+        let dp = d.rem(&x);
 
         let x = NonZero::new(q.wrapping_sub(BoxedUint::one()))
             .into_option()
             .ok_or(Error::InvalidPrime)?;
-        let dq = d.rem_vartime(&x);
+        let dq = d.rem(&x);
 
         // Note that since `p` and `q` may have different `bits_precision`,
         // so we have to equalize them to calculate the remainder.
+        let p_nz = p_params.modulus().as_nz_ref();
         let q_mod_p = match p.bits_precision().cmp(&q.bits_precision()) {
-            Ordering::Less => (&q
-                % NonZero::new(p.clone())
-                    .expect("`p` is non-zero")
-                    .resize_unchecked(q.bits_precision()))
-            .resize_unchecked(p.bits_precision()),
-            Ordering::Greater => {
-                (&q).resize_unchecked(p.bits_precision())
-                    % &NonZero::new(p.clone()).expect("`p` is non-zero")
-            }
-            Ordering::Equal => &q % NonZero::new(p.clone()).expect("`p` is non-zero"),
+            Ordering::Less => (&q % p_nz.resize_unchecked(q.bits_precision()))
+                .resize_unchecked(p.bits_precision()),
+            Ordering::Greater => (&q).resize_unchecked(p.bits_precision()) % p_nz,
+            Ordering::Equal => &q % p_nz,
         };
 
         let q_mod_p = BoxedMontyForm::new(q_mod_p, &p_params);
@@ -560,10 +568,17 @@ impl RsaPrivateKey {
 
     /// Compute CRT coefficient: `(1/q) mod p`.
     pub fn crt_coefficient(&self) -> Option<BoxedUint> {
-        let p = &self.primes[0];
-        let q = &self.primes[1];
-        // TODO: maybe store primes as `NonZero`?
-        Option::from(q.invert_mod(&NonZero::new(p.clone()).expect("prime")))
+        let [p, q, ..] = self.primes.as_slice() else {
+            return None;
+        };
+        let p_nz = NonZero::new(p.clone()).into_option()?;
+        let q_resized = match p.bits_precision().cmp(&q.bits_precision()) {
+            Ordering::Less => (q % (&p_nz).resize_unchecked(q.bits_precision()))
+                .resize_unchecked(p.bits_precision()),
+            Ordering::Greater => q.resize_unchecked(p.bits_precision()),
+            Ordering::Equal => q.clone(),
+        };
+        Option::from(q_resized.invert_mod(&p_nz))
     }
 
     /// Performs basic sanity checks on the key.
@@ -571,17 +586,31 @@ impl RsaPrivateKey {
     pub fn validate(&self) -> Result<()> {
         check_public(self)?;
 
-        // Check that Πprimes == n.
+        if self.primes.len() < 2 {
+            return Err(Error::NprimesTooSmall);
+        }
+
+        // Check that primes are valid, distinct, and that Πprimes == n.
         let mut m = BoxedUint::one_with_precision(self.pubkey_components.n.bits_precision());
-        let one = BoxedUint::one();
-        for prime in &self.primes {
-            // Any primes ≤ 1 will cause divide-by-zero panics later.
-            if prime < &one {
-                return Err(Error::InvalidPrime);
+        let two = BoxedUint::from(2u64);
+        let mut invalid_primes = Choice::FALSE;
+        for (i, prime) in self.primes.iter().enumerate() {
+            // Any primes <= 1 will cause divide-by-zero panics later.
+            invalid_primes |= prime.ct_lt(&two) | !prime.is_odd();
+
+            // RFC 8017 §3.2 requires distinct prime factors, including for multiprime RSA.
+            for other in &self.primes[..i] {
+                invalid_primes |= prime.ct_eq(other);
             }
             m = m.wrapping_mul(prime);
         }
-        if m != *self.pubkey_components.n {
+
+        // Reveal only whether the factors are invalid, not which factor or pair failed.
+        if invalid_primes.to_bool() {
+            return Err(Error::InvalidPrime);
+        }
+
+        if m.ct_ne(self.pubkey_components.n.as_ref()).to_bool() {
             return Err(Error::InvalidModulus);
         }
 
@@ -593,9 +622,11 @@ impl RsaPrivateKey {
         let de = self.d.concatenating_mul(&self.pubkey_components.e);
 
         for prime in &self.primes {
-            let x = NonZero::new(prime.wrapping_sub(BoxedUint::one())).unwrap();
-            let congruence = de.rem_vartime(&x);
-            if !bool::from(congruence.is_one()) {
+            let x = NonZero::new(prime.wrapping_sub(BoxedUint::one()))
+                .into_option()
+                .ok_or(Error::InvalidPrime)?;
+            let congruence = de.rem(&x);
+            if !congruence.is_one().to_bool() {
                 return Err(Error::InvalidExponent);
             }
         }
@@ -1158,5 +1189,316 @@ mod tests {
         assert_eq!(PrivateKeyParts::dq(&key), PrivateKeyParts::dq(&ref_key));
 
         assert_eq!(PrivateKeyParts::d(&key), PrivateKeyParts::d(&ref_key));
+    }
+
+    #[test]
+    fn reject_unit_prime_in_from_components() {
+        // primes = [1, n] and [n, 1] pass the product check (1 * n == n)
+        // and must be rejected by validate() with Error::InvalidPrime.
+        let n = BoxedUint::from(3233u64);
+        let e = BoxedUint::from(17u64);
+        let d = BoxedUint::from(413u64);
+        let one = BoxedUint::one();
+
+        assert_eq!(
+            RsaPrivateKey::from_components(
+                n.clone(),
+                e.clone(),
+                d.clone(),
+                vec![one.clone(), n.clone()]
+            ),
+            Err(Error::InvalidPrime)
+        );
+        assert_eq!(
+            RsaPrivateKey::from_components(
+                n.clone(),
+                e.clone(),
+                d.clone(),
+                vec![n.clone(), one.clone()]
+            ),
+            Err(Error::InvalidPrime)
+        );
+        assert_eq!(
+            RsaPrivateKey::from_components(
+                n.clone(),
+                e.clone(),
+                d.clone(),
+                vec![one.clone(), one.clone(), n.clone()]
+            ),
+            Err(Error::InvalidPrime)
+        );
+
+        // Modulus n = 1 with primes [1, 1] must return an error without panicking.
+        assert_eq!(
+            RsaPrivateKey::from_components(
+                one.clone(),
+                BoxedUint::from(65_537u64),
+                one.clone(),
+                vec![one.clone(), one.clone()]
+            ),
+            Err(Error::InvalidModulus)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "encoding")]
+    fn reject_unit_prime_in_pkcs1_and_pkcs8_der() {
+        use pkcs1::DecodeRsaPrivateKey;
+        use pkcs8::{der::asn1::OctetStringRef, SecretDocument};
+
+        // Construct a valid PKCS#1 DER structure whose prime1 is 1 and prime2 is n.
+        let n = BoxedUint::from(3233u64).to_be_bytes();
+        let e = BoxedUint::from(17u64).to_be_bytes();
+        let d = BoxedUint::from(413u64).to_be_bytes();
+        let one = BoxedUint::one().to_be_bytes();
+
+        let pkcs1_doc = SecretDocument::encode_msg(&pkcs1::RsaPrivateKeyRef {
+            modulus: pkcs1::UintRef::new(&n).unwrap(),
+            public_exponent: pkcs1::UintRef::new(&e).unwrap(),
+            private_exponent: pkcs1::UintRef::new(&d).unwrap(),
+            prime1: pkcs1::UintRef::new(&one).unwrap(),
+            prime2: pkcs1::UintRef::new(&n).unwrap(),
+            exponent1: pkcs1::UintRef::new(&one).unwrap(),
+            exponent2: pkcs1::UintRef::new(&one).unwrap(),
+            coefficient: pkcs1::UintRef::new(&one).unwrap(),
+            other_prime_infos: None,
+        })
+        .unwrap();
+
+        assert_eq!(
+            RsaPrivateKey::from_pkcs1_der(pkcs1_doc.as_bytes()),
+            Err(pkcs1::Error::KeyMalformed)
+        );
+
+        let pkcs8_doc: SecretDocument = pkcs8::PrivateKeyInfoRef::new(
+            pkcs1::ALGORITHM_ID,
+            OctetStringRef::new(pkcs1_doc.as_bytes()).unwrap(),
+        )
+        .try_into()
+        .unwrap();
+
+        assert!(matches!(
+            RsaPrivateKey::from_pkcs8_der(pkcs8_doc.as_bytes()),
+            Err(pkcs8::Error::KeyMalformed(_))
+        ));
+    }
+
+    #[test]
+    fn reject_repeated_primes() {
+        // Each exponent satisfies de ≡ 1 mod (p - 1) for every factor, so only
+        // the distinct-factors check rejects these keys.
+        for (factors, d) in [
+            (&[61u64, 61][..], 53u64),
+            (&[61, 61, 53][..], 413),
+            (&[61, 53, 61][..], 413),
+            (&[61, 53, 53][..], 413),
+            (&[61, 53, 47, 47][..], 10553),
+        ] {
+            let primes: Vec<_> = factors
+                .iter()
+                .zip([64, 128, 192, 256])
+                .map(|(&p, bits)| BoxedUint::from(p).resize_unchecked(bits))
+                .collect();
+            let n = compute_modulus(&primes).unwrap().get();
+            let e = BoxedUint::from(17u64);
+            let d = BoxedUint::from(d);
+
+            assert_eq!(
+                RsaPrivateKey::from_components(n, e.clone(), d, primes.clone()),
+                Err(Error::InvalidPrime)
+            );
+            if primes.len() == 2 {
+                assert_eq!(
+                    RsaPrivateKey::from_p_q(primes[0].clone(), primes[1].clone(), e.clone()),
+                    Err(Error::InvalidPrime)
+                );
+            }
+            assert_eq!(
+                RsaPrivateKey::from_primes(primes, e),
+                Err(Error::InvalidPrime)
+            );
+        }
+    }
+
+    #[test]
+    fn reject_invalid_private_exponent_congruence() {
+        // Valid small key: p = 61, q = 53, n = 3233, e = 17, d = 413.
+        let n = BoxedUint::from(3233u64);
+        let e = BoxedUint::from(17u64);
+        let d = BoxedUint::from(413u64);
+        let primes = vec![BoxedUint::from(61u64), BoxedUint::from(53u64)];
+
+        assert!(
+            RsaPrivateKey::from_components(n.clone(), e.clone(), d.clone(), primes.clone()).is_ok()
+        );
+
+        // Perturbing d by +2 breaks de ≡ 1 mod (p - 1).
+        let bad_d = d.wrapping_add(BoxedUint::from(2u64));
+        assert_eq!(
+            RsaPrivateKey::from_components(n.clone(), e.clone(), bad_d, primes.clone()),
+            Err(Error::InvalidExponent)
+        );
+
+        // Zero private exponent must also fail congruence validation.
+        assert_eq!(
+            RsaPrivateKey::from_components(n, e, BoxedUint::zero(), primes),
+            Err(Error::InvalidExponent)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "encoding")]
+    fn reject_perturbed_exponent_on_2048bit_key() {
+        const RSA_2048_PRIV_DER: &[u8] = include_bytes!("../tests/examples/pkcs8/rsa2048-priv.der");
+        let ref_key = RsaPrivateKey::from_pkcs8_der(RSA_2048_PRIV_DER).unwrap();
+        let bad_d = ref_key.d().wrapping_add(BoxedUint::from(2u64));
+        let res = RsaPrivateKey::from_components(
+            ref_key.n().as_ref().clone(),
+            ref_key.e().clone(),
+            bad_d,
+            ref_key.primes().to_vec(),
+        );
+        assert_eq!(res, Err(Error::InvalidExponent));
+    }
+
+    #[test]
+    fn reject_invalid_factors_in_from_p_q_and_from_primes() {
+        let e = BoxedUint::from(17u64);
+        for bad in [0u64, 1, 2, 4] {
+            for other in [0u64, 1, 2, 4, 61] {
+                for (p, q) in [(bad, other), (other, bad)] {
+                    let p = BoxedUint::from(p);
+                    let q = BoxedUint::from(q);
+                    assert_eq!(
+                        RsaPrivateKey::from_p_q(p.clone(), q.clone(), e.clone()),
+                        Err(Error::InvalidPrime)
+                    );
+                    assert_eq!(
+                        RsaPrivateKey::from_primes(vec![p, q], e.clone()),
+                        Err(Error::InvalidPrime)
+                    );
+                }
+            }
+
+            for i in 0..3 {
+                let mut primes = vec![
+                    BoxedUint::from(61u64),
+                    BoxedUint::from(53u64),
+                    BoxedUint::from(47u64),
+                ];
+                primes[i] = BoxedUint::from(bad);
+                assert_eq!(
+                    RsaPrivateKey::from_primes(primes, e.clone()),
+                    Err(Error::InvalidPrime)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn from_components_empty_primes_invalid_inputs_no_panic() {
+        let n = BoxedUint::from(3233u64).resize_unchecked(256);
+        let e = BoxedUint::from(65_537u64);
+
+        // d = 0 must return an error rather than underflowing (d * e - 1).
+        assert_eq!(
+            RsaPrivateKey::from_components(n.clone(), e.clone(), BoxedUint::zero(), vec![]),
+            Err(Error::InvalidArguments)
+        );
+
+        // Narrow d with wider n and wider e must not truncate or panic.
+        let wide_e = BoxedUint::one_with_precision(128)
+            .shl_vartime(64)
+            .unwrap()
+            .wrapping_add(BoxedUint::one());
+        assert!(RsaPrivateKey::from_components(n, wide_e, BoxedUint::from(3u64), vec![]).is_err());
+    }
+
+    #[test]
+    fn unbalanced_primes_and_narrow_d_no_panic() {
+        // p fits in 64 bits (61), q is a 65-bit prime (2^64 + 13 = 18446744073709551629).
+        let p = BoxedUint::from(61u64);
+        let q = BoxedUint::from(18_446_744_073_709_551_629u128);
+        let e = BoxedUint::from(65_537u64);
+
+        // Both orientations test Ordering::Less and Ordering::Greater precision paths.
+        for (a, b) in [(p.clone(), q.clone()), (q.clone(), p.clone())] {
+            let key = RsaPrivateKey::from_p_q(a.clone(), b.clone(), e.clone()).unwrap();
+            assert_eq!(key.validate(), Ok(()));
+            assert!(key.crt_coefficient().is_some());
+
+            #[cfg(feature = "encoding")]
+            {
+                use pkcs1::{DecodeRsaPrivateKey, EncodeRsaPrivateKey};
+                let der = key.to_pkcs1_der().unwrap();
+                let decoded = RsaPrivateKey::from_pkcs1_der(der.as_bytes()).unwrap();
+                assert_eq!(decoded.n(), key.n());
+            }
+
+            // Narrow d (64-bit precision) against wider primes must fail validation cleanly.
+            assert_eq!(
+                RsaPrivateKey::from_components(
+                    key.n().as_ref().clone(),
+                    e.clone(),
+                    BoxedUint::from(3u64),
+                    vec![a, b],
+                ),
+                Err(Error::InvalidExponent)
+            );
+        }
+
+        // Also test when de (128-bit precision) is narrower than prime - 1 (256-bit precision).
+        let wide_q = BoxedUint::from_be_hex(
+            "000000000000000100000000000000000000000000000000000000000000003b",
+            256,
+        )
+        .unwrap();
+        let wide_n = p.concatenating_mul(&wide_q);
+        assert_eq!(
+            RsaPrivateKey::from_components(
+                wide_n,
+                e.clone(),
+                BoxedUint::from(3u64),
+                vec![p, wide_q]
+            ),
+            Err(Error::InvalidExponent)
+        );
+
+        // Valid key where d (192-bit precision) is narrower than q (256-bit precision):
+        // p = 3, e = 65537, d = 2^176 + 1 (odd, not divisible by 3), q = d * e > 2^192.
+        let narrow_d =
+            BoxedUint::from_be_hex("000100000000000000000000000000000000000000000001", 192)
+                .unwrap();
+        let wide_q = narrow_d.concatenating_mul(&e);
+        let wide_q_bits = wide_q.bit_width();
+        let wide_q = wide_q.resize_unchecked(wide_q_bits);
+        assert!(narrow_d.bits_precision() < wide_q.bits_precision());
+        let small_p = BoxedUint::from(3u64);
+        let prod_n = small_p.concatenating_mul(&wide_q);
+        let key =
+            RsaPrivateKey::from_components(prod_n, e, narrow_d, vec![small_p, wide_q]).unwrap();
+        assert!(key.precomputed.is_some());
+        #[cfg(feature = "encoding")]
+        {
+            use pkcs1::{DecodeRsaPrivateKey, EncodeRsaPrivateKey};
+            let der = key.to_pkcs1_der().unwrap();
+            let decoded = RsaPrivateKey::from_pkcs1_der(der.as_bytes()).unwrap();
+            assert_eq!(decoded.n(), key.n());
+        }
+    }
+
+    #[test]
+    fn non_coprime_distinct_odd_factors_precompute_error() {
+        // Distinct odd composite factors 9 and 15 pass validate() (3 * 19 ≡ 1 mod 8 and mod 14),
+        // and precompute() must return Err(Error::InvalidPrime) rather than panicking.
+        for (p, q) in [(9u64, 15u64), (15, 9)] {
+            let n = BoxedUint::from(p * q);
+            let e = BoxedUint::from(3u64);
+            let d = BoxedUint::from(19u64);
+            let primes = vec![BoxedUint::from(p), BoxedUint::from(q)];
+            let mut key = RsaPrivateKey::from_components(n, e, d, primes).unwrap();
+            assert!(key.precomputed.is_none());
+            assert_eq!(key.precompute(), Err(Error::InvalidPrime));
+        }
     }
 }
