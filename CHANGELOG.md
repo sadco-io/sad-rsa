@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Public-exponent operations (`rsa_encrypt`, and so signature verification and encryption, plus
+  the `r^e` blinding factor) now exponentiate over the bit length of `e` instead of its full
+  precision. With `e = 65537` this makes RSA-2048 verification and encryption about 2.5x faster.
+  `e` is public, so nothing secret is exposed; private-exponent operations are unchanged ([#74]).
+
+[#74]: https://github.com/sadco-io/sad-rsa/issues/74
+
 ## [0.10.3] - 2026-11-13
 
 ### Security
