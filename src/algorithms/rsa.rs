@@ -21,7 +21,7 @@ use crate::traits::keys::{PrivateKeyParts, PublicKeyParts};
 /// or signature scheme. See the [module-level documentation][crate::hazmat] for more information.
 #[inline]
 pub fn rsa_encrypt<K: PublicKeyParts>(key: &K, m: &BoxedUint) -> Result<BoxedUint> {
-    let res = pow_mod_params(m, key.e(), key.n_params());
+    let res = pow_mod_public(m, key.e(), key.n_params());
     Ok(res)
 }
 
@@ -199,7 +199,7 @@ fn blind<R: TryCryptoRng + ?Sized, K: PublicKeyParts>(
 
     let blinded = {
         // r^e (mod n)
-        let mut rpowe = pow_mod_params(&r, key.e(), n_params);
+        let mut rpowe = pow_mod_public(&r, key.e(), n_params);
         // c * r^e (mod n)
         let c = c.mul_mod(&rpowe, n_params.modulus().as_nz_ref());
         rpowe.zeroize();
@@ -233,9 +233,21 @@ fn unblind(m: &BoxedUint, unblinder: &BoxedUint, n_params: &BoxedMontyParams) ->
 }
 
 /// Computes `base.pow_mod(exp, n)` with precomputed `n_params`.
+///
+/// Runs over the full precision of `exp`, so it is the one to use for secret exponents.
 fn pow_mod_params(base: &BoxedUint, exp: &BoxedUint, n_params: &BoxedMontyParams) -> BoxedUint {
     let base = reduce_vartime(base, n_params);
     base.pow(exp).retrieve()
+}
+
+/// Computes `base.pow_mod(e, n)` with precomputed `n_params`, where `e` is the **public** exponent.
+///
+/// Only the significant bits of `e` are processed rather than its full precision, which leaks
+/// the bit length of `e` through timing. Never pass a secret exponent (`d`, `dp`, `dq`): use
+/// [`pow_mod_params`] for those. The computation stays constant-time with respect to `base`.
+fn pow_mod_public(base: &BoxedUint, e: &BoxedUint, n_params: &BoxedMontyParams) -> BoxedUint {
+    let base = reduce_vartime(base, n_params);
+    base.pow_bounded_exp(e, e.bit_width_vartime()).retrieve()
 }
 
 fn reduce_vartime(n: &BoxedUint, p: &BoxedMontyParams) -> BoxedMontyForm {
@@ -449,6 +461,47 @@ pub(crate) fn compute_private_exponent_carmicheal(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pow_mod_public_matches_pow_mod_params() {
+        let bits = 256;
+        let n = BoxedUint::from_be_hex(
+            "c3a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a7",
+            bits,
+        )
+        .unwrap();
+        let n_params = BoxedMontyParams::new(Odd::new(n).unwrap());
+        let bases = [
+            BoxedUint::zero_with_precision(bits),
+            BoxedUint::one_with_precision(bits),
+            BoxedUint::from_be_slice(&[0x5a; 31], bits).unwrap(),
+            // Not reduced modulo `n`.
+            BoxedUint::from_be_slice(&[0xff; 32], bits).unwrap(),
+        ];
+        // Exponents at several precisions, including ones much wider than their value.
+        let exponents = [
+            BoxedUint::from(0u64),
+            BoxedUint::from(1u64),
+            BoxedUint::from(2u64),
+            BoxedUint::from(3u64),
+            BoxedUint::from(65_537u64),
+            BoxedUint::from_be_slice(&[0x01, 0x00, 0x01], 24).unwrap(),
+            BoxedUint::from(65_537u64).resize_unchecked(bits),
+            BoxedUint::from((1u64 << 33) - 1),
+            BoxedUint::from(u64::MAX),
+            BoxedUint::from_be_slice(&[0xa5; 32], bits).unwrap(),
+        ];
+
+        for base in &bases {
+            for e in &exponents {
+                assert_eq!(
+                    pow_mod_public(base, e, &n_params),
+                    pow_mod_params(base, e, &n_params),
+                    "base={base} e={e}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn recover_primes_works() {
