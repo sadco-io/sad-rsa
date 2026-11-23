@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [#74]: https://github.com/sadco-io/sad-rsa/issues/74
 
+## [0.10.4] - 2026-11-19
+
+### Security
+
+- Fix panics during RSA private-key construction, validation, or re-encoding. 0.10.4 rejects factors below 2, even factors, repeated factors, and a zero private exponent during prime recovery. It also computes the CRT coefficient and re-encodes valid two-prime keys when the first prime occupies more limbs than the second. Previously a factor of 1 reached a later check that panicked (in `RsaPrivateKey::from_components` and when decoding a PKCS#1 or PKCS#8 private key), `RsaPrivateKey::from_primes` and `RsaPrivateKey::from_p_q` could panic during construction when a supplied factor was 0, 1, or even, and `crt_coefficient`, `to_pkcs1_der`, `to_pkcs8_der`, and `serde` serialization could panic even for valid two-prime keys when the first prime occupied more limbs than the second. See GHSA-3hj7-mch7-c7cc.
+
+### Security hardening
+
+- Use constant-time remainder (`BoxedUint::rem`) instead of `rem_vartime` with
+  secret divisors (`p - 1`, `q - 1`, `prime - 1`) in private-key precomputation
+  and validation, matching upstream `rsa` 0.10.0.
+
 ## [0.10.3] - 2026-11-13
 
 ### Security

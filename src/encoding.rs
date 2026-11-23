@@ -10,7 +10,7 @@ use crate::{
     RsaPrivateKey, RsaPublicKey,
 };
 use core::convert::{TryFrom, TryInto};
-use crypto_bigint::{BoxedUint, NonZero, Resize};
+use crypto_bigint::{BoxedUint, CheckedSub, NonZero};
 use pkcs8::{
     der::{asn1::OctetStringRef, Decode},
     Document, EncodePrivateKey, EncodePublicKey, ObjectIdentifier, SecretDocument,
@@ -23,6 +23,9 @@ pub const ID_RSASSA_PSS: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.84
 // PKCS#1
 
 fn uint_from_slice(data: &[u8], bits: u32) -> pkcs1::Result<BoxedUint> {
+    if bits == 0 {
+        return Err(pkcs1::Error::KeyMalformed);
+    }
     BoxedUint::from_be_slice(data, bits).map_err(|_| pkcs1::Error::KeyMalformed)
 }
 
@@ -110,8 +113,8 @@ where
 
 impl pkcs1::EncodeRsaPrivateKey for RsaPrivateKey {
     fn to_pkcs1_der(&self) -> pkcs1::Result<SecretDocument> {
-        // Check if the key is multi prime
-        if self.primes.len() > 2 {
+        // Check if the key is multi prime or lacks two primes
+        if self.primes.len() != 2 {
             return Err(pkcs1::Error::Crypto);
         }
 
@@ -121,23 +124,23 @@ impl pkcs1::EncodeRsaPrivateKey for RsaPrivateKey {
         let prime1 = Zeroizing::new(self.primes[0].to_be_bytes());
         let prime2 = Zeroizing::new(self.primes[1].to_be_bytes());
 
-        let bits = self.d().bits_precision();
+        let p_minus_1 = self.primes[0]
+            .checked_sub(&BoxedUint::one_with_precision(
+                self.primes[0].bits_precision(),
+            ))
+            .into_option()
+            .and_then(|v| NonZero::new(v).into_option())
+            .ok_or(pkcs1::Error::Crypto)?;
+        let q_minus_1 = self.primes[1]
+            .checked_sub(&BoxedUint::one_with_precision(
+                self.primes[1].bits_precision(),
+            ))
+            .into_option()
+            .and_then(|v| NonZero::new(v).into_option())
+            .ok_or(pkcs1::Error::Crypto)?;
 
-        debug_assert!(bits >= self.primes[0].bit_width_vartime());
-        debug_assert!(bits >= self.primes[1].bit_width_vartime());
-
-        let exponent1 = Zeroizing::new(
-            (self.d()
-                % NonZero::new((&self.primes[0]).resize_unchecked(bits) - &BoxedUint::one())
-                    .unwrap())
-            .to_be_bytes(),
-        );
-        let exponent2 = Zeroizing::new(
-            (self.d()
-                % NonZero::new((&self.primes[1]).resize_unchecked(bits) - &BoxedUint::one())
-                    .unwrap())
-            .to_be_bytes(),
-        );
+        let exponent1 = Zeroizing::new(self.d().rem(&p_minus_1).to_be_bytes());
+        let exponent2 = Zeroizing::new(self.d().rem(&q_minus_1).to_be_bytes());
         let coefficient = Zeroizing::new(
             self.crt_coefficient()
                 .ok_or(pkcs1::Error::Crypto)?
