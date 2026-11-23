@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-11-23
+
 ### Changed
 
 - Public-exponent operations (`rsa_encrypt`, and so signature verification and encryption, plus
