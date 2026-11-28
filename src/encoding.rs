@@ -9,6 +9,7 @@ use crate::{
     traits::{PrivateKeyParts, PublicKeyParts},
     RsaPrivateKey, RsaPublicKey,
 };
+use alloc::vec::Vec;
 use core::convert::{TryFrom, TryInto};
 use crypto_bigint::{BoxedUint, CheckedSub, NonZero};
 use pkcs8::{
@@ -66,6 +67,12 @@ where
             .and_then(|len| len.checked_mul(8))
             .ok_or(KeyMalformed)?;
 
+        // Reject oversized keys before allocating or computing anything from them. DER
+        // integers have no leading zero octets, so the byte length bounds the bit length.
+        if modulus.len() > RsaPrivateKey::MAX_SIZE.div_ceil(8) {
+            return Err(KeyMalformed);
+        }
+
         let n = uint_from_slice(modulus, bits)?;
         let bits_e = u32::try_from(public_exponent.len())
             .ok()
@@ -74,12 +81,20 @@ where
         let e = uint_from_slice(public_exponent, bits_e)?;
         let e = Option::from(e).ok_or(KeyMalformed)?;
 
-        let d = uint_from_slice(private_exponent, bits)?;
-        let prime1 = uint_from_slice(prime1, bits)?;
-        let prime2 = uint_from_slice(prime2, bits)?;
-        let primes = vec![prime1, prime2];
+        // Wiped if a later field fails to decode; `from_components` wipes them on its own
+        // error paths.
+        let mut d = Zeroizing::new(uint_from_slice(private_exponent, bits)?);
+        let mut primes = Zeroizing::new(Vec::with_capacity(2));
+        primes.push(uint_from_slice(prime1, bits)?);
+        primes.push(uint_from_slice(prime2, bits)?);
 
-        RsaPrivateKey::from_components(n, e, d, primes).map_err(|_| KeyMalformed)
+        RsaPrivateKey::from_components(
+            n,
+            e,
+            core::mem::take(&mut *d),
+            core::mem::take(&mut *primes),
+        )
+        .map_err(|_| KeyMalformed)
     }
 }
 
@@ -124,28 +139,32 @@ impl pkcs1::EncodeRsaPrivateKey for RsaPrivateKey {
         let prime1 = Zeroizing::new(self.primes[0].to_be_bytes());
         let prime2 = Zeroizing::new(self.primes[1].to_be_bytes());
 
-        let p_minus_1 = self.primes[0]
-            .checked_sub(&BoxedUint::one_with_precision(
-                self.primes[0].bits_precision(),
-            ))
-            .into_option()
-            .and_then(|v| NonZero::new(v).into_option())
-            .ok_or(pkcs1::Error::Crypto)?;
-        let q_minus_1 = self.primes[1]
-            .checked_sub(&BoxedUint::one_with_precision(
-                self.primes[1].bits_precision(),
-            ))
-            .into_option()
-            .and_then(|v| NonZero::new(v).into_option())
-            .ok_or(pkcs1::Error::Crypto)?;
-
-        let exponent1 = Zeroizing::new(self.d().rem(&p_minus_1).to_be_bytes());
-        let exponent2 = Zeroizing::new(self.d().rem(&q_minus_1).to_be_bytes());
-        let coefficient = Zeroizing::new(
-            self.crt_coefficient()
-                .ok_or(pkcs1::Error::Crypto)?
-                .to_be_bytes(),
+        // `p - 1`, `q - 1` and the CRT values are secret; every intermediate copy is wiped.
+        let p_minus_1 = Zeroizing::new(
+            self.primes[0]
+                .checked_sub(&BoxedUint::one_with_precision(
+                    self.primes[0].bits_precision(),
+                ))
+                .into_option()
+                .and_then(|v| NonZero::new(v).into_option())
+                .ok_or(pkcs1::Error::Crypto)?,
         );
+        let q_minus_1 = Zeroizing::new(
+            self.primes[1]
+                .checked_sub(&BoxedUint::one_with_precision(
+                    self.primes[1].bits_precision(),
+                ))
+                .into_option()
+                .and_then(|v| NonZero::new(v).into_option())
+                .ok_or(pkcs1::Error::Crypto)?,
+        );
+
+        let exponent1 = Zeroizing::new(self.d().rem(&p_minus_1));
+        let exponent1 = Zeroizing::new(exponent1.to_be_bytes());
+        let exponent2 = Zeroizing::new(self.d().rem(&q_minus_1));
+        let exponent2 = Zeroizing::new(exponent2.to_be_bytes());
+        let coefficient = Zeroizing::new(self.crt_coefficient().ok_or(pkcs1::Error::Crypto)?);
+        let coefficient = Zeroizing::new(coefficient.to_be_bytes());
 
         Ok(SecretDocument::encode_msg(&pkcs1::RsaPrivateKeyRef {
             modulus: pkcs1::UintRef::new(&modulus)?,

@@ -19,6 +19,10 @@ use spki::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signature {
     pub(super) inner: BoxedUint,
+    /// Length of the signature in bytes, as it was given or produced. A signature is only
+    /// valid when it is exactly as long as the modulus, and the precision of `inner` is
+    /// rounded up to whole limbs, so the length is kept here.
+    pub(super) len: usize,
 }
 
 impl SignatureEncoding for Signature {
@@ -38,13 +42,19 @@ impl TryFrom<&[u8]> for Signature {
     fn try_from(bytes: &[u8]) -> signature::Result<Self> {
         // TODO(tarcieri): max length restriction? (#350)
         let inner = BoxedUint::from_be_slice_vartime(bytes);
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            len: bytes.len(),
+        })
     }
 }
 
 impl From<Signature> for Box<[u8]> {
     fn from(signature: Signature) -> Box<[u8]> {
-        signature.inner.to_be_bytes()
+        // `inner` is encoded with whole limbs; return the bytes the signature was made of.
+        let bytes = signature.inner.to_be_bytes();
+        let start = bytes.len().saturating_sub(signature.len);
+        bytes[start..].into()
     }
 }
 
@@ -104,6 +114,7 @@ mod tests {
         use serde_test::{assert_tokens, Configure, Token};
         let signature = Signature {
             inner: BoxedUint::from(42u32),
+            len: 8,
         };
 
         let tokens = [Token::Str("000000000000002a")];

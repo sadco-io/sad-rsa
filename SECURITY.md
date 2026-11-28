@@ -22,6 +22,31 @@ and RustSec advisories for `rsa`, and mirror any that affect shared code. Becaus
 `cargo deny` match advisories by package name, an upstream `rsa` advisory will not flag `sad-rsa`
 on its own.
 
+### Severity ratings
+
+We rate each advisory with CVSS, following the FIRST specification and user guide, and check the
+result against how NVD and other maintainers scored the closest comparable public advisories.
+Where the two disagree we follow the specification and say so in the advisory.
+
+- The advisory's severity field carries the CVSS 3.1 base vector, which is the version NVD assigns.
+- The advisory text also states the CVSS 4.0 vector. It includes the Exploit Maturity metric only
+  when the base score alone would misstate what is known, and then says why.
+- As a library, `sad-rsa` is scored for the reasonable worst-case use of the affected API.
+
+### Timing tests on every release
+
+From 0.10.6 onwards, every release tag is tested for timing side channels in decryption before it
+is published. We run the [Marvin toolkit](https://github.com/tomato42/marvin-toolkit) harness in
+[`marvin-toolkit/`](marvin-toolkit/) against the tagged source, once for PKCS#1 v1.5 decryption
+and once in its OAEP mode. The toolkit reports, the sample size and the machine used are added
+under [`tests/marvin/`](tests/marvin/), whether the release passes or not.
+
+The pass criterion is the toolkit's own verdict over its recommended ciphertext classes. For
+OAEP those are the classes that decryption rejects: no rejected ciphertext may be
+distinguishable from another by timing. The harness also measures two valid OAEP ciphertexts
+and reports them for information. A valid ciphertext is expected to take longer than a rejected
+one, and OAEP reports that outcome to the caller in any case.
+
 ## Reporting a Vulnerability
 
 If you have discovered a security vulnerability in this project, please report

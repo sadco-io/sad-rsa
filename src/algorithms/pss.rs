@@ -169,6 +169,29 @@ where
     Ok(em)
 }
 
+/// Splits the output of the RSA verification primitive, `key_len` octets long, into the
+/// encoded message of `emLen = ceil((key_bits - 1) / 8)` octets.
+///
+/// When the modulus is `8k + 1` bits long the encoded message is one octet shorter than the
+/// modulus. RFC 8017 § 8.1.2 step 2.c converts the message representative with
+/// `I2OSP(m, emLen)`, which fails if it does not fit, so the octet that is cut off must be
+/// zero.
+fn emsa_pss_encoded_message(em: &mut [u8], key_bits: usize) -> Result<(&mut [u8], usize)> {
+    let em_bits = key_bits.checked_sub(1).ok_or(Error::Verification)?;
+    let em_len = em_bits.div_ceil(8);
+    let key_len = key_bits.div_ceil(8);
+    if em_len == 0 || em.len() != key_len {
+        return Err(Error::Verification);
+    }
+
+    let (leading, em) = em.split_at_mut(key_len - em_len);
+    if leading.iter().any(|octet| *octet != 0) {
+        return Err(Error::Verification);
+    }
+
+    Ok((em, em_bits))
+}
+
 fn emsa_pss_verify_pre<'a>(
     m_hash: &[u8],
     em: &'a mut [u8],
@@ -186,11 +209,18 @@ fn emsa_pss_verify_pre<'a>(
     }
 
     let em_len = em.len(); //(em_bits + 7) / 8;
-    if let Some(s_len) = s_len {
-        // 3. If emLen < hLen + sLen + 2, output "inconsistent" and stop.
-        if em_len < h_len + s_len + 2 {
-            return Err(Error::Verification);
-        }
+
+    // 3. If emLen < hLen + sLen + 2, output "inconsistent" and stop.
+    //
+    // When the salt length is detected from the signature it is not known yet, but it is
+    // never negative: a modulus too small for the hash and an empty salt cannot hold any
+    // encoded message, and the split below relies on this bound.
+    let min_em_len = h_len
+        .checked_add(s_len.unwrap_or(0))
+        .and_then(|len| len.checked_add(2))
+        .ok_or(Error::Verification)?;
+    if em_len < min_em_len {
+        return Err(Error::Verification);
     }
 
     // 4. If the rightmost octet of EM does not have hexadecimal value
@@ -277,12 +307,10 @@ pub(crate) fn emsa_pss_verify<D>(
 where
     D: Digest + FixedOutputReset,
 {
-    let em_bits = key_bits - 1;
-    let em_len = em_bits.div_ceil(8);
-    let key_len = key_bits.div_ceil(8);
     let h_len = <D as Digest>::output_size();
 
-    let em = &mut em[key_len - em_len..];
+    let (em, em_bits) = emsa_pss_encoded_message(em, key_bits)?;
+    let em_len = em.len();
 
     let (db, h) = emsa_pss_verify_pre(m_hash, em, em_bits, s_len, h_len)?;
 
@@ -333,12 +361,10 @@ pub(crate) fn emsa_pss_verify_digest<D>(
 where
     D: Digest + FixedOutputReset,
 {
-    let em_bits = key_bits - 1;
-    let em_len = em_bits.div_ceil(8);
-    let key_len = key_bits.div_ceil(8);
     let h_len = <D as Digest>::output_size();
 
-    let em = &mut em[key_len - em_len..];
+    let (em, em_bits) = emsa_pss_encoded_message(em, key_bits)?;
+    let em_len = em.len();
 
     let (db, h) = emsa_pss_verify_pre(m_hash, em, em_bits, s_len, h_len)?;
 
@@ -379,5 +405,60 @@ where
         Ok(())
     } else {
         Err(Error::Verification)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sha2::Sha256;
+
+    #[test]
+    fn encoded_message_is_one_octet_shorter_for_8k_plus_1_bit_moduli() {
+        // 1025-bit modulus: 129 octets from the RSA primitive, 128 octets of encoded message.
+        let mut em = vec![0x5a; 129];
+        em[0] = 0;
+        let (encoded, em_bits) = emsa_pss_encoded_message(&mut em, 1025).unwrap();
+        assert_eq!((encoded.len(), em_bits), (128, 1024));
+
+        // The octet that is cut off must be zero.
+        let mut em = vec![0x5a; 129];
+        em[0] = 1;
+        assert_eq!(
+            emsa_pss_encoded_message(&mut em, 1025).unwrap_err(),
+            Error::Verification
+        );
+
+        // 1024-bit modulus: nothing is cut off.
+        let mut em = vec![0x5a; 128];
+        let (encoded, em_bits) = emsa_pss_encoded_message(&mut em, 1024).unwrap();
+        assert_eq!((encoded.len(), em_bits), (128, 1023));
+
+        // Wrong buffer length and degenerate sizes are errors, not panics.
+        assert!(emsa_pss_encoded_message(&mut [0u8; 127], 1024).is_err());
+        assert!(emsa_pss_encoded_message(&mut [], 0).is_err());
+        assert!(emsa_pss_encoded_message(&mut [0u8; 1], 1).is_err());
+    }
+
+    #[test]
+    fn verify_rejects_encoded_messages_too_short_for_the_hash() {
+        let m_hash = [0u8; 32];
+        for key_bits in [9usize, 64, 256, 257, 264, 265, 272] {
+            for s_len in [None, Some(0), Some(32), Some(usize::MAX)] {
+                let mut em = vec![0xbc; key_bits.div_ceil(8)];
+                em[0] = 0;
+                assert_eq!(
+                    emsa_pss_verify_digest::<Sha256>(&m_hash, &mut em.clone(), s_len, key_bits),
+                    Err(Error::Verification),
+                    "key_bits={key_bits} s_len={s_len:?}"
+                );
+                let mut hash = Sha256::new();
+                assert_eq!(
+                    emsa_pss_verify(&m_hash, &mut em, s_len, &mut hash, key_bits),
+                    Err(Error::Verification),
+                    "key_bits={key_bits} s_len={s_len:?}"
+                );
+            }
+        }
     }
 }

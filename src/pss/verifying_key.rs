@@ -85,6 +85,7 @@ where
             &self.inner,
             &digest.finalize(),
             &signature.inner,
+            signature.len,
             self.salt_len,
         )
         .map_err(|e| e.into())
@@ -96,8 +97,14 @@ where
     D: Digest + FixedOutputReset,
 {
     fn verify_prehash(&self, prehash: &[u8], signature: &Signature) -> signature::Result<()> {
-        verify_digest::<D>(&self.inner, prehash, &signature.inner, self.salt_len)
-            .map_err(|e| e.into())
+        verify_digest::<D>(
+            &self.inner,
+            prehash,
+            &signature.inner,
+            signature.len,
+            self.salt_len,
+        )
+        .map_err(|e| e.into())
     }
 }
 
@@ -110,6 +117,7 @@ where
             &self.inner,
             &D::digest(msg),
             &signature.inner,
+            signature.len,
             self.salt_len,
         )
         .map_err(|e| e.into())

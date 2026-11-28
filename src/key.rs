@@ -8,7 +8,7 @@ use crypto_bigint::{
     BoxedUint, Choice, ConcatenatingMul, CtEq, CtLt, Integer, NonZero, Odd, Resize,
 };
 use rand_core::CryptoRng;
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 #[cfg(feature = "serde")]
 use {
     pkcs8::{DecodePrivateKey, EncodePrivateKey},
@@ -282,6 +282,13 @@ impl RsaPrivateKey {
     /// Minimum size of the modulus `n` in bits. Currently only applies to keygen.
     const MIN_SIZE: u32 = 1024;
 
+    /// Maximum size of the modulus `n` of a private key in bits.
+    ///
+    /// Key generation, [`RsaPrivateKey::from_components`], [`RsaPrivateKey::from_p_q`],
+    /// [`RsaPrivateKey::from_primes`] and PKCS#1 / PKCS#8 decoding reject larger keys with
+    /// [`Error::ModulusTooLarge`], which bounds the work an untrusted private key can cause.
+    pub const MAX_SIZE: usize = 16384;
+
     /// Generate a new RSA key pair with a modulus of the given bit size using the passed in `rng`.
     ///
     /// # Errors
@@ -312,6 +319,9 @@ impl RsaPrivateKey {
         if bit_size < Self::MIN_SIZE as usize {
             return Err(Error::ModulusTooSmall);
         }
+        if bit_size > Self::MAX_SIZE {
+            return Err(Error::ModulusTooLarge);
+        }
 
         let components = generate_multi_prime_key_with_exp(rng, 2, bit_size, exp)?;
         RsaPrivateKey::from_components(
@@ -336,6 +346,10 @@ impl RsaPrivateKey {
         bit_size: usize,
         exp: BoxedUint,
     ) -> Result<RsaPrivateKey> {
+        if bit_size > Self::MAX_SIZE {
+            return Err(Error::ModulusTooLarge);
+        }
+
         let components = generate_multi_prime_key_with_exp(rng, 2, bit_size, exp)?;
         RsaPrivateKey::from_components(
             components.n.get(),
@@ -362,13 +376,21 @@ impl RsaPrivateKey {
         n: BoxedUint,
         e: BoxedUint,
         d: BoxedUint,
-        mut primes: Vec<BoxedUint>,
+        primes: Vec<BoxedUint>,
     ) -> Result<RsaPrivateKey> {
+        // Hold the secret inputs in wiping wrappers, so they are cleared on every error path.
+        // On success they move into the key, which wipes them when it is dropped.
+        let mut d = Zeroizing::new(d);
+        let mut primes = Zeroizing::new(primes);
+
         let n = Odd::new(n).into_option().ok_or(Error::InvalidModulus)?;
 
         // The modulus may come in padded with zeros, shorten it
         // to ensure optimal performance of arithmetic operations.
         let n_bits = n.bit_width_vartime();
+        if n_bits as usize > Self::MAX_SIZE {
+            return Err(Error::ModulusTooLarge);
+        }
         let n = n.resize_unchecked(n_bits);
 
         let n_params = BoxedMontyParams::new(n.clone());
@@ -400,16 +422,15 @@ impl RsaPrivateKey {
         }
 
         // The primes may come in padded with zeros too, so we need to shorten them as well.
-        let primes = primes
-            .into_iter()
-            .map(|p| {
-                let p_bits = p.bit_width();
-                if p_bits == 0 {
-                    return Err(Error::InvalidPrime);
-                }
-                Ok(p.resize_unchecked(p_bits))
-            })
-            .collect::<Result<Vec<_>>>()?;
+        // The originals stay in `primes` and are wiped when it is dropped.
+        let mut trimmed = Zeroizing::new(Vec::with_capacity(primes.len()));
+        for p in primes.iter() {
+            let p_bits = p.bit_width();
+            if p_bits == 0 {
+                return Err(Error::InvalidPrime);
+            }
+            trimmed.push(p.resize_unchecked(p_bits));
+        }
 
         let mut k = RsaPrivateKey {
             pubkey_components: RsaPublicKey {
@@ -417,8 +438,8 @@ impl RsaPrivateKey {
                 e,
                 n_params,
             },
-            d,
-            primes,
+            d: core::mem::take(&mut *d),
+            primes: core::mem::take(&mut *trimmed),
             precomputed: None,
         };
 
@@ -442,16 +463,24 @@ impl RsaPrivateKey {
         q: BoxedUint,
         public_exponent: BoxedUint,
     ) -> Result<RsaPrivateKey> {
+        // Wiped on every error path; on success the factors move into the key.
+        let mut primes = Zeroizing::new(vec![p, q]);
+        let (p, q) = (&primes[0], &primes[1]);
+
         let two = BoxedUint::from(2u64);
-        if (p.ct_eq(&q) | p.ct_lt(&two) | q.ct_lt(&two) | !p.is_odd() | !q.is_odd()).to_bool() {
+        if (p.ct_eq(q) | p.ct_lt(&two) | q.ct_lt(&two) | !p.is_odd() | !q.is_odd()).to_bool() {
             return Err(Error::InvalidPrime);
         }
 
-        let d = compute_private_exponent_carmicheal(&p, &q, &public_exponent)?;
-        let primes = vec![p, q];
+        let mut d = Zeroizing::new(compute_private_exponent_carmicheal(p, q, &public_exponent)?);
         let n = compute_modulus(&primes)?;
 
-        Self::from_components(n.get(), public_exponent, d, primes)
+        Self::from_components(
+            n.get(),
+            public_exponent,
+            core::mem::take(&mut *d),
+            core::mem::take(&mut *primes),
+        )
     }
 
     /// Constructs an RSA key pair from its primes.
@@ -461,6 +490,9 @@ impl RsaPrivateKey {
         primes: Vec<BoxedUint>,
         public_exponent: BoxedUint,
     ) -> Result<RsaPrivateKey> {
+        // Wiped on every error path; on success the factors move into the key.
+        let mut primes = Zeroizing::new(primes);
+
         if primes.len() < 2 {
             return Err(Error::NprimesTooSmall);
         }
@@ -479,9 +511,17 @@ impl RsaPrivateKey {
         }
 
         let n = compute_modulus(&primes)?;
-        let d = compute_private_exponent_euler_totient(&primes, &public_exponent)?;
+        let mut d = Zeroizing::new(compute_private_exponent_euler_totient(
+            &primes,
+            &public_exponent,
+        )?);
 
-        Self::from_components(n.get(), public_exponent, d, primes)
+        Self::from_components(
+            n.get(),
+            public_exponent,
+            core::mem::take(&mut *d),
+            core::mem::take(&mut *primes),
+        )
     }
 
     /// Get the public key from the private key.
@@ -509,8 +549,6 @@ impl RsaPrivateKey {
         let [p, q, ..] = self.primes.as_slice() else {
             return Err(Error::NprimesTooSmall);
         };
-        let p = p.clone();
-        let q = q.clone();
 
         let p_odd = Odd::new(p.clone())
             .into_option()
@@ -521,28 +559,43 @@ impl RsaPrivateKey {
             .ok_or(Error::InvalidPrime)?;
         let q_params = BoxedMontyParams::new(q_odd);
 
-        let x = NonZero::new(p.wrapping_sub(BoxedUint::one()))
-            .into_option()
-            .ok_or(Error::InvalidPrime)?;
+        // `p - 1` and `q - 1` are as secret as the primes; wipe them when done.
+        let x = Zeroizing::new(
+            NonZero::new(p.wrapping_sub(BoxedUint::one()))
+                .into_option()
+                .ok_or(Error::InvalidPrime)?,
+        );
         let dp = d.rem(&x);
 
-        let x = NonZero::new(q.wrapping_sub(BoxedUint::one()))
-            .into_option()
-            .ok_or(Error::InvalidPrime)?;
+        let x = Zeroizing::new(
+            NonZero::new(q.wrapping_sub(BoxedUint::one()))
+                .into_option()
+                .ok_or(Error::InvalidPrime)?,
+        );
         let dq = d.rem(&x);
 
         // Note that since `p` and `q` may have different `bits_precision`,
         // so we have to equalize them to calculate the remainder.
         let p_nz = p_params.modulus().as_nz_ref();
         let q_mod_p = match p.bits_precision().cmp(&q.bits_precision()) {
-            Ordering::Less => (&q % p_nz.resize_unchecked(q.bits_precision()))
-                .resize_unchecked(p.bits_precision()),
-            Ordering::Greater => (&q).resize_unchecked(p.bits_precision()) % p_nz,
-            Ordering::Equal => &q % p_nz,
+            Ordering::Less => {
+                let p_wide = Zeroizing::new(p_nz.resize_unchecked(q.bits_precision()));
+                let mut rem = Zeroizing::new(q % &*p_wide);
+                let narrow = (&*rem).resize_unchecked(p.bits_precision());
+                rem.zeroize();
+                narrow
+            }
+            Ordering::Greater => {
+                let q_wide = Zeroizing::new(q.resize_unchecked(p.bits_precision()));
+                &*q_wide % p_nz
+            }
+            Ordering::Equal => q % p_nz,
         };
 
-        let q_mod_p = BoxedMontyForm::new(q_mod_p, &p_params);
-        let qinv = q_mod_p.invert().into_option().ok_or(Error::InvalidPrime)?;
+        let mut q_mod_p = BoxedMontyForm::new(q_mod_p, &p_params);
+        let qinv = q_mod_p.invert().into_option();
+        q_mod_p.zeroize();
+        let qinv = qinv.ok_or(Error::InvalidPrime)?;
 
         debug_assert_eq!(dp.bits_precision(), p.bits_precision());
         debug_assert_eq!(dq.bits_precision(), q.bits_precision());
@@ -571,13 +624,16 @@ impl RsaPrivateKey {
         let [p, q, ..] = self.primes.as_slice() else {
             return None;
         };
-        let p_nz = NonZero::new(p.clone()).into_option()?;
-        let q_resized = match p.bits_precision().cmp(&q.bits_precision()) {
-            Ordering::Less => (q % (&p_nz).resize_unchecked(q.bits_precision()))
-                .resize_unchecked(p.bits_precision()),
+        let p_nz = Zeroizing::new(NonZero::new(p.clone()).into_option()?);
+        let q_resized = Zeroizing::new(match p.bits_precision().cmp(&q.bits_precision()) {
+            Ordering::Less => {
+                let p_wide = Zeroizing::new((&*p_nz).resize_unchecked(q.bits_precision()));
+                let rem = Zeroizing::new(q % &*p_wide);
+                (&*rem).resize_unchecked(p.bits_precision())
+            }
             Ordering::Greater => q.resize_unchecked(p.bits_precision()),
             Ordering::Equal => q.clone(),
-        };
+        });
         Option::from(q_resized.invert_mod(&p_nz))
     }
 
@@ -591,7 +647,9 @@ impl RsaPrivateKey {
         }
 
         // Check that primes are valid, distinct, and that Πprimes == n.
-        let mut m = BoxedUint::one_with_precision(self.pubkey_components.n.bits_precision());
+        let mut m = Zeroizing::new(BoxedUint::one_with_precision(
+            self.pubkey_components.n.bits_precision(),
+        ));
         let two = BoxedUint::from(2u64);
         let mut invalid_primes = Choice::FALSE;
         for (i, prime) in self.primes.iter().enumerate() {
@@ -602,7 +660,7 @@ impl RsaPrivateKey {
             for other in &self.primes[..i] {
                 invalid_primes |= prime.ct_eq(other);
             }
-            m = m.wrapping_mul(prime);
+            *m = m.wrapping_mul(prime);
         }
 
         // Reveal only whether the factors are invalid, not which factor or pair failed.
@@ -619,13 +677,15 @@ impl RsaPrivateKey {
         // inverse. Therefore e is coprime to lcm(p-1,q-1,r-1,...) =
         // exponent(ℤ/nℤ). It also implies that a^de ≡ a mod p as a^(p-1) ≡ 1
         // mod p. Thus a^de ≡ a mod n for all a coprime to n, as required.
-        let de = self.d.concatenating_mul(&self.pubkey_components.e);
+        let de = Zeroizing::new(self.d.concatenating_mul(&self.pubkey_components.e));
 
         for prime in &self.primes {
-            let x = NonZero::new(prime.wrapping_sub(BoxedUint::one()))
-                .into_option()
-                .ok_or(Error::InvalidPrime)?;
-            let congruence = de.rem(&x);
+            let x = Zeroizing::new(
+                NonZero::new(prime.wrapping_sub(BoxedUint::one()))
+                    .into_option()
+                    .ok_or(Error::InvalidPrime)?,
+            );
+            let congruence = Zeroizing::new(de.rem(&x));
             if !congruence.is_one().to_bool() {
                 return Err(Error::InvalidExponent);
             }

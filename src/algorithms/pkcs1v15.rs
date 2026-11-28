@@ -13,7 +13,7 @@ use digest::{Digest, KeyInit, Mac};
 use hmac::Hmac;
 use rand_core::TryCryptoRng;
 use sha2::Sha256;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::errors::{Error, Result};
 
@@ -73,9 +73,16 @@ where
 /// * `key` - The key material (typically KDK)
 /// * `label` - A label to domain-separate different uses
 /// * `output_length` - Number of bytes to generate
+///
+/// The output is derived from the KDK and is wiped when dropped.
 #[inline]
-fn irprf(key: &[u8], label: &[u8], output_length: usize) -> Vec<u8> {
-    let mut output = Vec::with_capacity(output_length);
+fn irprf(key: &[u8], label: &[u8], output_length: usize) -> Zeroizing<Vec<u8>> {
+    // Whole HMAC blocks are appended before truncating, so reserve room for the last one:
+    // growing the vector would leave an unwiped copy behind.
+    let block_len = <Sha256 as Digest>::output_size();
+    let mut output = Zeroizing::new(Vec::with_capacity(
+        output_length.div_ceil(block_len) * block_len,
+    ));
     let mut counter: u16 = 0;
 
     while output.len() < output_length {
@@ -88,7 +95,9 @@ fn irprf(key: &[u8], label: &[u8], output_length: usize) -> Vec<u8> {
         // HMAC-SHA256(key, message)
         let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
         Mac::update(&mut mac, &message);
-        output.extend_from_slice(&Mac::finalize(mac).into_bytes());
+        let mut block = Mac::finalize(mac).into_bytes();
+        output.extend_from_slice(&block);
+        block.as_mut_slice().zeroize();
 
         counter += 1;
     }
@@ -108,8 +117,11 @@ fn irprf(key: &[u8], label: &[u8], output_length: usize) -> Vec<u8> {
 ///
 /// # Returns
 /// A 32-byte KDK derived from HMAC-SHA256(SHA256(I2OSP(d, k)), ciphertext)
+///
+/// The hash of the private exponent is private-key equivalent: whoever holds it can tell real
+/// plaintexts from synthetic ones. It and the KDK are wiped before returning or when dropped.
 #[inline]
-pub(crate) fn derive_kdk(private_exponent: &BoxedUint, ciphertext: &[u8]) -> [u8; 32] {
+pub(crate) fn derive_kdk(private_exponent: &BoxedUint, ciphertext: &[u8]) -> Zeroizing<[u8; 32]> {
     // k = modulus size in bytes (ciphertext must be exactly k bytes per RFC 8017)
     let k = ciphertext.len();
 
@@ -123,49 +135,57 @@ pub(crate) fn derive_kdk(private_exponent: &BoxedUint, ciphertext: &[u8]) -> [u8
     d_bytes[start..start + copy_len].copy_from_slice(&d_raw[d_raw.len() - copy_len..]);
 
     // Hash the private exponent (DH = SHA256(D))
-    let dh = Sha256::digest(&*d_bytes);
+    let mut dh = Sha256::digest(&*d_bytes);
 
     // HMAC with ciphertext to create KDK
     let mut mac = HmacSha256::new_from_slice(&dh).expect("HMAC can take key of any size");
+    dh.as_mut_slice().zeroize();
     Mac::update(&mut mac, ciphertext);
 
-    Mac::finalize(mac).into_bytes().into()
+    let mut tag = Mac::finalize(mac).into_bytes();
+    let mut kdk = Zeroizing::new([0u8; 32]);
+    kdk.copy_from_slice(&tag);
+    tag.as_mut_slice().zeroize();
+    kdk
 }
 
-/// Selects an alternative (synthetic) message length from pseudo-random candidates.
+/// Selects the alternative (synthetic) message length from pseudo-random candidates, as
+/// specified in draft-irtf-cfrg-rsa-guidance-04 Section 7.2, step 3.3.
 ///
-/// This function derives a message length in the valid range [0, max_message_length]
-/// from pseudo-random input. The selection is performed in constant-time.
+/// The candidates are read as two-octet big endian numbers. Each has its high order bits
+/// cleared so that it is no longer in bits than the maximum message length `k - 11`, and the
+/// last candidate that is not larger than `k - 11` is selected, or 0 if there is none.
+///
+/// Every candidate is processed and the selection uses constant-time assignment, so neither
+/// the selected length nor its position among the candidates is revealed by timing.
 ///
 /// # Arguments
-/// * `length_candidates` - 256 bytes of pseudo-random data from IRPRF
+/// * `length_candidates` - 256 bytes of pseudo-random data from IRPRF (128 candidates)
 /// * `k` - The modulus size in bytes
 ///
 /// # Returns
 /// A message length in the range [0, k-11]
 #[inline]
 fn select_alternative_length(length_candidates: &[u8], k: usize) -> u32 {
-    // Maximum message length for PKCS#1 v1.5 is k - 11
-    let max_message_length = k.saturating_sub(11) as u32;
+    // Maximum message length for PKCS#1 v1.5 is k - 11. Candidates are 16 bits wide, so the
+    // limit saturates there; the modulus size is public.
+    let max_message_length = k.saturating_sub(11).min(u16::MAX as usize) as u32;
 
-    // Use first 4 bytes as u32
-    let mut candidate = u32::from_be_bytes([
-        length_candidates[0],
-        length_candidates[1],
-        length_candidates[2],
-        length_candidates[3],
-    ]);
+    // All ones up to and including the highest set bit of `max_message_length`.
+    let mut mask = max_message_length;
+    mask |= mask >> 1;
+    mask |= mask >> 2;
+    mask |= mask >> 4;
+    mask |= mask >> 8;
 
-    // Modulo to ensure candidate is in valid range
-    // This is acceptable as the distribution is close enough to uniform
-    // for cryptographic purposes when max_message_length is not a power of 2
-    if max_message_length > 0 {
-        candidate %= max_message_length + 1;
-    } else {
-        candidate = 0;
+    let mut selected = 0u32;
+    for pair in length_candidates.as_chunks::<2>().0 {
+        let candidate = ((u32::from(pair[0]) << 8) | u32::from(pair[1])) & mask;
+        let in_range = !max_message_length.ct_lt(&candidate);
+        selected.ct_assign(&candidate, in_range);
     }
 
-    candidate
+    selected
 }
 
 /// Removes the encryption padding scheme from PKCS#1 v1.5 using implicit rejection.
@@ -187,12 +207,9 @@ fn select_alternative_length(length_candidates: &[u8], k: usize) -> u32 {
 /// message (if padding is invalid). This function never returns an error based on padding
 /// validity.
 #[inline]
-pub(crate) fn pkcs1v15_encrypt_unpad(em: Vec<u8>, k: usize, kdk: &[u8; 32]) -> Vec<u8> {
-    let (valid, out, index) = match decrypt_inner(em, k) {
-        Ok(result) => result,
-        // If k < 11, decrypt_inner returns error - handle safely
-        Err(_) => (0, vec![0; k], 0),
-    };
+pub(crate) fn pkcs1v15_encrypt_unpad(em: &[u8], k: usize, kdk: &[u8; 32]) -> Vec<u8> {
+    debug_assert_eq!(em.len(), k);
+    let (valid, index) = decrypt_inner(em, k);
 
     // Maximum possible message length for PKCS#1 v1.5: k - 11
     let max_message_length = k.saturating_sub(11);
@@ -224,7 +241,7 @@ pub(crate) fn pkcs1v15_encrypt_unpad(em: Vec<u8>, k: usize, kdk: &[u8; 32]) -> V
     // SECURITY: Always iterate over the full max_message_length to prevent
     // loop iteration count from leaking message length.
     //
-    // Both `out` and `synthetic_full` have length k. We read right-aligned:
+    // Both `em` and `synthetic_full` have length k. We read right-aligned:
     // position i in the output maps to position (k - max_message_length + i)
     // in both source buffers, ranging from index 11 to k-1 — always in-bounds.
     //
@@ -236,7 +253,7 @@ pub(crate) fn pkcs1v15_encrypt_unpad(em: Vec<u8>, k: usize, kdk: &[u8; 32]) -> V
     // constants, so the iteration count is still independent of the plaintext.
     for (i, out_byte) in output[..max_message_length].iter_mut().enumerate() {
         let src_index = k - max_message_length + i;
-        let act_byte = out[src_index];
+        let act_byte = em[src_index];
         let syn_byte = synthetic_full[src_index];
         *out_byte = u8::ct_select(&syn_byte, &act_byte, valid_choice);
     }
@@ -260,7 +277,8 @@ pub(crate) fn pkcs1v15_encrypt_unpad(em: Vec<u8>, k: usize, kdk: &[u8; 32]) -> V
 fn ct_left_align(buf: &mut [u8], max_message_length: usize, output_length: usize) {
     debug_assert_eq!(buf.len(), max_message_length.saturating_mul(2));
     let start = max_message_length.saturating_sub(output_length);
-    let mut dest = vec![0u8; max_message_length.saturating_mul(2)];
+    // Scratch copy of the message, wiped when dropped.
+    let mut dest = Zeroizing::new(vec![0u8; max_message_length.saturating_mul(2)]);
     for (dest_i, dest_byte) in dest[..max_message_length].iter_mut().enumerate() {
         let want = dest_i.saturating_add(start) as u32;
         let mut acc = 0u8;
@@ -273,15 +291,17 @@ fn ct_left_align(buf: &mut [u8], max_message_length: usize, output_length: usize
     buf.copy_from_slice(&dest);
 }
 
-/// Removes the PKCS1v15 padding It returns one or zero in valid that indicates whether the
-/// plaintext was correctly structured. In either case, the plaintext is
-/// returned in em so that it may be read independently of whether it was valid
-/// in order to maintain constant memory access patterns. If the plaintext was
-/// valid then index contains the index of the original message in em.
+/// Checks the PKCS#1 v1.5 encryption padding of `em`. It returns one or zero in valid that
+/// indicates whether the plaintext was correctly structured. Every byte of `em` is read
+/// whether or not it was valid, in order to maintain constant memory access patterns. If the
+/// plaintext was valid then index contains the index of the original message in em.
+///
+/// A modulus shorter than 11 bytes cannot hold a padded message, so it is reported as
+/// invalid; the modulus size is public.
 #[inline]
-fn decrypt_inner(em: Vec<u8>, k: usize) -> Result<(u8, Vec<u8>, u32)> {
-    if k < 11 {
-        return Err(Error::Decryption);
+fn decrypt_inner(em: &[u8], k: usize) -> (u8, u32) {
+    if k < 11 || em.len() < 11 {
+        return (0, 0);
     }
 
     let first_byte_is_zero = em[0].ct_eq(&0u8);
@@ -307,7 +327,7 @@ fn decrypt_inner(em: Vec<u8>, k: usize) -> Result<(u8, Vec<u8>, u32)> {
     let valid = first_byte_is_zero & second_byte_is_two & !looking_for_index & valid_ps;
     index = u32::ct_select(&0, &(index + 1), valid);
 
-    Ok((valid.to_u8(), em, index))
+    (valid.to_u8(), index)
 }
 
 #[inline]

@@ -85,6 +85,7 @@ where
             &self.prefix,
             &digest.finalize_fixed(),
             &signature.inner,
+            signature.len,
         )
         .map_err(|e| e.into())
     }
@@ -95,7 +96,14 @@ where
     D: Digest,
 {
     fn verify_prehash(&self, prehash: &[u8], signature: &Signature) -> signature::Result<()> {
-        verify(&self.inner, &self.prefix, prehash, &signature.inner).map_err(|e| e.into())
+        verify(
+            &self.inner,
+            &self.prefix,
+            prehash,
+            &signature.inner,
+            signature.len,
+        )
+        .map_err(|e| e.into())
     }
 }
 
@@ -109,6 +117,7 @@ where
             &self.prefix.clone(),
             &D::digest(msg),
             &signature.inner,
+            signature.len,
         )
         .map_err(|e| e.into())
     }

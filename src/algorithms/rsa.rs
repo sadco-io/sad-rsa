@@ -8,7 +8,7 @@ use crypto_bigint::{
     RandomMod, Resize,
 };
 use rand_core::TryCryptoRng;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::errors::{Error, Result};
 use crate::traits::keys::{PrivateKeyParts, PublicKeyParts};
@@ -83,16 +83,24 @@ pub fn rsa_decrypt<R: TryCryptoRng + ?Sized>(
             // TODO: it may be faster to convert to and from Montgomery with prepared parameters
             // (modulo `p` and `q`) rather than calculating the remainder directly.
 
+            // The intermediate values below are copies of the primes or parts of the
+            // result, so they are wiped once they are no longer needed. Wiping does not
+            // depend on the values.
+
             // m1 = c^dP mod p
-            let p_wide = p_params.modulus().resize_unchecked(c.bits_precision());
+            let p_wide = Zeroizing::new(p_params.modulus().resize_unchecked(c.bits_precision()));
             let c_mod_dp = (&c % p_wide.as_nz_ref()).resize_unchecked(dp.bits_precision());
-            let cp = BoxedMontyForm::new(c_mod_dp, p_params);
+            let mut cp = BoxedMontyForm::new(c_mod_dp, p_params);
             let mut m1 = cp.pow(dp);
+            cp.zeroize();
             // m2 = c^dQ mod q
-            let q_wide = q_params.modulus().resize_unchecked(c.bits_precision());
+            let q_wide = Zeroizing::new(q_params.modulus().resize_unchecked(c.bits_precision()));
             let c_mod_dq = (&c % q_wide.as_nz_ref()).resize_unchecked(dq.bits_precision());
-            let cq = BoxedMontyForm::new(c_mod_dq, q_params);
-            let m2 = cq.pow(dq).retrieve();
+            let mut cq = BoxedMontyForm::new(c_mod_dq, q_params);
+            let mut m2_monty = cq.pow(dq);
+            cq.zeroize();
+            let m2 = Zeroizing::new(m2_monty.retrieve());
+            m2_monty.zeroize();
 
             // Note that since `p` and `q` may have different `bits_precision`,
             // it may be different for `m1` and `m2` as well.
@@ -100,30 +108,43 @@ pub fn rsa_decrypt<R: TryCryptoRng + ?Sized>(
             // (m1 - m2) mod p = (m1 mod p) - (m2 mod p) mod p
             let m2_mod_p = match p_params.bits_precision().cmp(&q_params.bits_precision()) {
                 Ordering::Less => {
-                    let p_wide = p_params
-                        .modulus()
-                        .as_nz_ref()
-                        .resize_unchecked(q_params.bits_precision());
-                    (&m2 % p_wide).resize_unchecked(p_params.bits_precision())
+                    let p_wide = Zeroizing::new(
+                        p_params
+                            .modulus()
+                            .as_nz_ref()
+                            .resize_unchecked(q_params.bits_precision()),
+                    );
+                    let rem = Zeroizing::new(&*m2 % &*p_wide);
+                    (&*rem).resize_unchecked(p_params.bits_precision())
                 }
-                Ordering::Greater => (&m2).resize_unchecked(p_params.bits_precision()),
-                Ordering::Equal => m2.clone(),
+                Ordering::Greater => (&*m2).resize_unchecked(p_params.bits_precision()),
+                Ordering::Equal => (*m2).clone(),
             };
-            let m2r = BoxedMontyForm::new(m2_mod_p, p_params);
+            let mut m2r = BoxedMontyForm::new(m2_mod_p, p_params);
             m1 -= &m2r;
+            m2r.zeroize();
 
             // precomputed: qInv = (1/q) mod p
 
             // h = qInv.(m1 - m2) mod p
-            let h = (qinv * m1).retrieve();
+            let mut h_monty = qinv * &m1;
+            m1.zeroize();
+            let h = Zeroizing::new(h_monty.retrieve());
+            h_monty.zeroize();
 
             // m = m2 + h.q
-            let m2 = m2.try_resize(n.bits_precision()).ok_or(Error::Internal)?;
-            let hq = h
-                .concatenating_mul(q)
-                .try_resize(n.bits_precision())
-                .ok_or(Error::Internal)?;
-            m2.wrapping_add(&hq)
+            let m2 = Zeroizing::new(
+                (&*m2)
+                    .try_resize(n.bits_precision())
+                    .ok_or(Error::Internal)?,
+            );
+            let hq_wide = Zeroizing::new(h.concatenating_mul(q));
+            let hq = Zeroizing::new(
+                (&*hq_wide)
+                    .try_resize(n.bits_precision())
+                    .ok_or(Error::Internal)?,
+            );
+            m2.wrapping_add(&*hq)
         }
         _ => {
             // c^d (mod n)
@@ -132,9 +153,13 @@ pub fn rsa_decrypt<R: TryCryptoRng + ?Sized>(
     };
 
     match ir {
-        Some(ref ir) => {
-            // unblind
-            let res = unblind(&m, ir, n_params);
+        Some(mut ir) => {
+            // unblind; the blinded result and the unblinding factor together give the
+            // result, so wipe both.
+            let mut m = m;
+            let res = unblind(&m, &ir, n_params);
+            m.zeroize();
+            ir.zeroize();
             Ok(res)
         }
         None => Ok(m),
@@ -169,6 +194,26 @@ pub fn rsa_decrypt_and_check<R: TryCryptoRng + ?Sized>(
     }
 
     Ok(m)
+}
+
+/// Checks a signature against RFC 8017 § 8.1.2 / § 8.2.2 step 1 (the signature is exactly `k`
+/// octets long) and RSAVP1 step 1 (the signature representative is below the modulus).
+///
+/// Every signature verification path goes through this check, so that a signature with its
+/// leading zero octets removed, or with the modulus added to it, is rejected everywhere.
+///
+/// Returns the signature representative with the precision of the modulus.
+pub(crate) fn signature_representative<K: PublicKeyParts>(
+    key: &K,
+    sig: &BoxedUint,
+    sig_len: usize,
+) -> Result<BoxedUint> {
+    if sig_len != key.size() || sig >= key.n().as_ref() {
+        return Err(Error::Verification);
+    }
+
+    sig.try_resize(key.n_bits_precision())
+        .ok_or(Error::Verification)
 }
 
 /// Returns the blinded c, along with the unblinding factor.
@@ -206,6 +251,9 @@ fn blind<R: TryCryptoRng + ?Sized, K: PublicKeyParts>(
 
         c
     };
+
+    // The blinding factor is no longer needed; only its inverse is returned.
+    r.zeroize();
 
     let ir = ir.expect("loop exited");
     debug_assert_eq!(blinded.bits_precision(), bits);

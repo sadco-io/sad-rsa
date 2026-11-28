@@ -6,8 +6,9 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-rsa = "0.9"
-
-[patch.crates-io]
-rsa = { git = "https://github.com/RustCrypto/RSA", branch = "const-crypto-biguint" }
-crypto-bigint = { git = "https://github.com/RustCrypto/crypto-bigint", branch = "master" }
+# The upstream harness source uses `rsa::`; this maps it to sad-rsa.
+#
+# Default: the sad-rsa source tree mounted at /sad-rsa (see README.md).
+# To test a published release instead, replace the line below with e.g.
+#   rsa = { version = "=0.10.5", package = "sad-rsa", features = ["sha2"] }
+rsa = { path = "/sad-rsa", package = "sad-rsa", features = ["sha2"] }

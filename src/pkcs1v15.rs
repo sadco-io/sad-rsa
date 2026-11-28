@@ -29,7 +29,7 @@ use crate::algorithms::pkcs1v15::{
     derive_kdk as pkcs1v15_generate_kdk, pkcs1v15_encrypt_pad, pkcs1v15_encrypt_unpad,
     pkcs1v15_generate_prefix, pkcs1v15_sign_pad, pkcs1v15_sign_unpad,
 };
-use crate::algorithms::rsa::{rsa_decrypt_and_check, rsa_encrypt};
+use crate::algorithms::rsa::{rsa_decrypt_and_check, rsa_encrypt, signature_representative};
 use crate::errors::{Error, Result};
 use crate::key::{self, RsaPrivateKey, RsaPublicKey};
 use crate::traits::{keys::PrivateKeyParts, PaddingScheme, PublicKeyParts, SignatureScheme};
@@ -122,6 +122,7 @@ impl SignatureScheme for Pkcs1v15Sign {
             self.prefix.as_ref(),
             hashed,
             &BoxedUint::from_be_slice_vartime(sig),
+            sig.len(),
         )
     }
 }
@@ -172,15 +173,9 @@ fn decrypt<R: TryCryptoRng + ?Sized>(
     let em = rsa_decrypt_and_check(priv_key, rng, &ciphertext_uint)?;
     let em = uint_to_zeroizing_be_pad(em, priv_key.size())?;
 
-    // Use implicit rejection - never returns error based on padding validity
-    // Move the Vec out of Zeroizing — the Zeroizing wrapper drops with an empty vec,
-    // and pkcs1v15_encrypt_unpad takes ownership for constant-time processing.
-    let mut em = em;
-    Ok(pkcs1v15_encrypt_unpad(
-        core::mem::take(&mut *em),
-        priv_key.size(),
-        &kdk,
-    ))
+    // Use implicit rejection - never returns error based on padding validity.
+    // `em` and `kdk` stay in their `Zeroizing` wrappers and are wiped on return.
+    Ok(pkcs1v15_encrypt_unpad(&em, priv_key.size(), &kdk))
 }
 
 /// Calculates the signature of hashed using
@@ -213,13 +208,16 @@ fn sign<R: TryCryptoRng + ?Sized>(
 
 /// Verifies an RSA PKCS#1 v1.5 signature.
 #[inline]
-fn verify(pub_key: &RsaPublicKey, prefix: &[u8], hashed: &[u8], sig: &BoxedUint) -> Result<()> {
-    let n = pub_key.n();
-    if sig >= n.as_ref() || sig.bits_precision() != pub_key.n_bits_precision() {
-        return Err(Error::Verification);
-    }
+fn verify(
+    pub_key: &RsaPublicKey,
+    prefix: &[u8],
+    hashed: &[u8],
+    sig: &BoxedUint,
+    sig_len: usize,
+) -> Result<()> {
+    let sig = signature_representative(pub_key, sig, sig_len)?;
 
-    let em = uint_to_be_pad(rsa_encrypt(pub_key, sig)?, pub_key.size())?;
+    let em = uint_to_be_pad(rsa_encrypt(pub_key, &sig)?, pub_key.size())?;
 
     pkcs1v15_sign_unpad(prefix, hashed, &em, pub_key.size())
 }
