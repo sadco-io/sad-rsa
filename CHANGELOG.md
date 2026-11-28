@@ -5,7 +5,98 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.10.6] - 2026-11-27
+
+### Security
+
+- **PSS verification no longer panics on a public key too small for the hash.** With the salt
+  length detected from the signature (`pss::VerifyingKey::new_with_auto_salt_len`, or `Pss`
+  with `salt_len: None`), nothing checked that the encoded message could hold the hash. A
+  public key whose modulus was at most `8 * hLen + 9` bits (521 bits with SHA-512, 265 bits
+  with SHA-256) together with a chosen signature made verification panic. Such keys are now
+  rejected with a verification error (GHSA-pm66-mrhh-2gmp).
+- **Decryption no longer copies a number of bytes that depends on the plaintext.** After the
+  private-key operation, the result was converted to bytes by skipping its leading zero bytes
+  and copying the rest, so the length of that copy depended on how many leading zero bytes
+  the decrypted value had. This affected OAEP and PKCS#1 v1.5 decryption. The
+  conversion now always copies the same number of bytes from the same offset. The difference
+  was measurable: with the Marvin toolkit at 200 million repetitions per class, 0.10.5 takes
+  11 ns longer to decrypt a ciphertext whose decrypted value starts with 208 zero bytes than
+  any other class tested (Friedman p = 2.7 × 10⁻¹⁶⁰), and this release does not
+  (GHSA-7p29-gw5p-v3h6).
+
+- **Marvin timing analysis rerun for this release.** Decryption (RSA-2048, no blinding) was
+  measured with the Marvin toolkit on a bare-metal machine at 200 million repetitions per
+  class, with the same key throughout.
+  - PKCS#1 v1.5, this release: the Friedman test passes (p = 0.53) and no pair of classes is
+    significant after correcting for the 66 comparisons. The largest mean difference is
+    3.2 ns on a 1,097,700 ns operation; a leak below 1.3 ns is not excluded, which is just
+    short of the toolkit's 1 ns bar.
+  - PKCS#1 v1.5, 0.10.5: fails (p = 2.7 × 10⁻¹⁶⁰), because of the 11 ns difference described
+    above. Earlier runs at 1 million and 4 million repetitions on a virtual machine passed
+    for both versions; their noise was too high to see it.
+  - OAEP, this release: over the nine classes of ciphertext that OAEP rejects, the Friedman
+    test passes (p = 0.82) and no pair has a sign-test p below 0.11. A valid ciphertext takes
+    about 35 ns longer than a rejected one; OAEP reports that outcome to the caller.
+  - Mean decryption time rose by 3.4 µs (0.3%) against 0.10.5.
+
+  Results, limits and reproduction steps are in `tests/marvin/README.md`.
+- **Every release is now tested this way.** From this release onwards, each release tag is run
+  through the Marvin harness for PKCS#1 v1.5 and OAEP decryption before it is published, and
+  the reports are added under `tests/marvin/` (see `SECURITY.md`).
+
+### Security hardening
+
+- Every signature verification path now requires the signature to be exactly as long as the
+  modulus and to be a number below the modulus (RFC 8017 § 8.1.2 and § 8.2.2 step 1, and
+  RSAVP1 step 1). Before, `RsaPublicKey::verify` with `Pss` accepted a signature with the
+  modulus added to it, and `pkcs1v15::VerifyingKey`, `pss::VerifyingKey` and `Pkcs1v15Sign`
+  accepted a signature with its leading zero bytes removed. A peer that strips leading zero
+  bytes from signatures produces invalid signatures, which are now rejected.
+- PSS verification with a modulus of `8k + 1` bits now requires the leading octet that is not
+  part of the encoded message to be zero.
+- More secrets are wiped from memory: the hash of the private exponent, the key derivation
+  key and the pseudo-random output used for PKCS#1 v1.5 implicit rejection; the decrypted
+  encoded message and scratch copies of the plaintext; the private exponent and factors on
+  the error paths of `RsaPrivateKey::from_components`, `from_p_q`, `from_primes` and PKCS#1 /
+  PKCS#8 decoding; and intermediate values of key validation, precomputation, encoding and
+  the CRT private-key operation. The Montgomery parameters for `p` and `q` still cannot be
+  wiped, because `crypto-bigint` does not expose a way to do it.
+- Private keys are limited to a modulus of 16384 bits (`RsaPrivateKey::MAX_SIZE`). Key
+  generation, `from_components`, `from_p_q`, `from_primes` and PKCS#1 / PKCS#8 decoding
+  reject larger keys before doing any work on them, so an untrusted private key can no
+  longer cause an unbounded amount of computation.
+
+### Fixed
+
+- **PKCS#1 v1.5 implicit rejection now selects the synthetic message length as
+  `draft-irtf-cfrg-rsa-guidance-04` specifies**, and passes all test vectors from its
+  Appendix B. The length was taken from the first four pseudo-random bytes modulo `k - 10`;
+  it is now the last of 128 masked candidates that is not larger than `k - 11`. For an
+  invalid ciphertext, decryption returns a different number of bytes from the end of the
+  same pseudo-random message than 0.10.5 did, and now matches other implementations of the
+  draft. Decryption of valid ciphertexts is unchanged. The result for an invalid ciphertext
+  was never meaningful, but code that stored or compared it across versions will see a
+  different value.
+- `pkcs1v15::Signature` and `pss::Signature` encode to exactly the number of bytes they were
+  created from. For a modulus that is not a whole number of 64-bit words they used to encode
+  with extra leading zero bytes, which no verifier accepts. `pss::Signature` formats as hex
+  of the same bytes.
+
+### Changed
+
+- The Marvin harness in `marvin-toolkit/` now pins the toolkit and `tlsfuzzer` revisions, builds
+  against the `sad-rsa` source tree by default, records what it was built against, and exits
+  with an error when a step fails. The unpinned toolkit had started to fail during ciphertext
+  generation while the container still exited successfully.
+- The Marvin harness can now measure OAEP decryption (`-m oaep`), using the toolkit's OAEP
+  ciphertext classes plus two valid OAEP classes. The result of an OAEP run is the toolkit's
+  verdict over the rejected classes; the valid classes are reported for information.
+- The harness now exits with the status of the toolkit's analysis, after copying the results
+  out, so a detected side channel fails the run without losing the report.
+- `marvin-toolkit/parallel-run.sh` runs the harness as one pinned process per CPU core, in
+  rounds, with one shared key, and merges the timings. It is what makes a run of hundreds of
+  millions of repetitions practical.
 
 ## [0.10.5] - 2026-11-23
 

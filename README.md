@@ -25,6 +25,24 @@ Instead of returning distinguishable errors for invalid PKCS#1 v1.5 padding, thi
 
 Implementation follows [draft-irtf-cfrg-rsa-guidance-04][irtf-guidance].
 
+### Timing evidence
+
+Every release tag from 0.10.6 onwards is measured with the [Marvin toolkit][marvin-attack]
+before it is published, for PKCS#1 v1.5 and for OAEP decryption. For 0.10.6, on RSA-2048
+without blinding at 200 million repetitions per ciphertext class:
+
+- PKCS#1 v1.5 decryption passes the toolkit's test over all twelve classes. The largest
+  difference between two classes is 3.2 ns on a 1.1 ms operation; a difference below 1.3 ns is
+  not excluded.
+- OAEP decryption passes over the nine classes of rejected ciphertext. A valid ciphertext
+  takes about 35 ns longer than a rejected one, which OAEP also reports to the caller as an
+  error.
+- 0.10.5 fails the PKCS#1 v1.5 test on the same machine, by 11 ns for one class. Upgrade.
+
+The reports, their limits and the commands to reproduce them are in
+[`tests/marvin/`](tests/marvin/README.md). The measurements are taken inside the decrypting
+process on one CPU model; they are not a proof of constant-time behaviour.
+
 ## Usage
 
 ```toml

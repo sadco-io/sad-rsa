@@ -1,6 +1,6 @@
 [package]
 name = "sad-rsa"
-version = "0.10.5"
+version = "0.10.6"
 authors = ["Sadco Security Team", "RustCrypto Developers", "dignifiedquire <dignifiedquire@gmail.com>"]
 edition = "2021"
 description = "Hardened pure Rust RSA implementation with Marvin attack mitigation"
@@ -11,7 +11,7 @@ keywords = ["rsa", "encryption", "security", "crypto", "constant-time"]
 categories = ["cryptography"]
 readme = "README.md"
 rust-version = "1.89"
-exclude = ["marvin_toolkit/", "marvin-toolkit/", "thirdparty/", "._*"]
+exclude = ["marvin_toolkit/", "marvin-toolkit/", "tests/marvin/", "thirdparty/", "._*"]
 
 [dependencies]
 const-oid = { version = "0.10", default-features = false }

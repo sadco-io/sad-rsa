@@ -357,10 +357,21 @@ fn test_synthetic_message_unpredictability() {
         synthetic_messages.push(synthetic);
     }
 
-    for i in 0..synthetic_messages.len() {
-        for j in i + 1..synthetic_messages.len() {
+    // The synthetic length is chosen as the draft specifies, so a short or empty synthetic
+    // message is a legitimate outcome (the draft has an "invalid decrypting to empty"
+    // vector) and two short ones can coincide. Messages long enough that a collision would
+    // mean a broken PRF must all differ, and most messages must be that long.
+    let long: Vec<_> = synthetic_messages.iter().filter(|m| m.len() >= 8).collect();
+    assert!(
+        long.len() >= synthetic_messages.len() * 3 / 4,
+        "only {} of {} synthetic messages are 8 bytes or longer",
+        long.len(),
+        synthetic_messages.len()
+    );
+    for i in 0..long.len() {
+        for j in i + 1..long.len() {
             assert_ne!(
-                synthetic_messages[i], synthetic_messages[j],
+                long[i], long[j],
                 "Synthetic messages should all be different"
             );
         }

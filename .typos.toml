@@ -5,3 +5,7 @@ extend-ignore-re = ["GHSA(-[23456789cfghjmpqrvwx]{4}){3}"]
 [default.extend-identifiers]
 # typ stands for type, but it's a reserved identifier
 typ = "typ"
+
+[files]
+# Test vectors hold key material in PEM and hex, which is not prose.
+extend-exclude = ["tests/examples/implicit_rejection/"]

@@ -1,0 +1,12 @@
+ID,Name
+0,no_padding_48
+1,no_structure
+2,signature_padding_8
+3,too_short_payload_0_1
+4,too_short_payload_0_3
+5,too_short_payload_0_7
+6,too_short_payload_0_15
+7,valid_0
+8,valid_oaep_32
+9,valid_oaep_190
+10,valid_repeated_byte_payload_245_0

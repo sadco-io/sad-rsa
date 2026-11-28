@@ -1,0 +1,4 @@
+rust-crypto v0.1.0 (/home/rustcrypto/marvin-toolkit/example/rust-crypto)
+├── anyhow v1.0.105
+├── clap v4.6.10
+└── sad-rsa v0.10.5 (/sad-rsa)

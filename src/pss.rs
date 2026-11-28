@@ -28,7 +28,7 @@ use rand_core::TryCryptoRng;
 
 use crate::algorithms::pad::{uint_to_be_pad, uint_to_zeroizing_be_pad};
 use crate::algorithms::pss::*;
-use crate::algorithms::rsa::{rsa_decrypt_and_check, rsa_encrypt};
+use crate::algorithms::rsa::{rsa_decrypt_and_check, rsa_encrypt, signature_representative};
 use crate::errors::{Error, Result};
 use crate::traits::PublicKeyParts;
 use crate::traits::SignatureScheme;
@@ -153,10 +153,8 @@ pub(crate) fn verify<D>(
 where
     D: Digest + FixedOutputReset,
 {
-    if sig_len != pub_key.size() {
-        return Err(Error::Verification);
-    }
-    let raw = rsa_encrypt(pub_key, sig)?;
+    let sig = signature_representative(pub_key, sig, sig_len)?;
+    let raw = rsa_encrypt(pub_key, &sig)?;
     let mut em = uint_to_be_pad(raw, pub_key.size())?;
 
     emsa_pss_verify(
@@ -172,17 +170,15 @@ pub(crate) fn verify_digest<D>(
     pub_key: &RsaPublicKey,
     hashed: &[u8],
     sig: &BoxedUint,
+    sig_len: usize,
     salt_len: Option<usize>,
 ) -> Result<()>
 where
     D: Digest + FixedOutputReset,
 {
-    let n = pub_key.n();
-    if sig >= n.as_ref() || sig.bits_precision() != pub_key.n_bits_precision() {
-        return Err(Error::Verification);
-    }
+    let sig = signature_representative(pub_key, sig, sig_len)?;
 
-    let mut em = uint_to_be_pad(rsa_encrypt(pub_key, sig)?, pub_key.size())?;
+    let mut em = uint_to_be_pad(rsa_encrypt(pub_key, &sig)?, pub_key.size())?;
 
     emsa_pss_verify_digest::<D>(hashed, &mut em, salt_len, pub_key.n().bit_width() as _)
 }
